@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Boston Tide Height (NOAA)</title>
+  <script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
+  <style>
+    :root { --fg:#111; --muted:#666; --bg:#fff; --card:#f6f6f6; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 24px; color: var(--fg); background: var(--bg); }
+    h1 { font-size: 20px; margin: 0 0 12px; }
+    .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; }
+    label { display: grid; gap: 6px; font-size: 13px; color: var(--muted); }
+    input, select, button { font-size: 14px; padding: 10px 12px; border-radius: 10px; border: 1px solid #ddd; background: #fff; }
+    button { cursor: pointer; border: 1px solid #ccc; background: #111; color: #fff; }
+    button:disabled { opacity: .6; cursor: not-allowed; }
+    .card { background: var(--card); padding: 14px; border-radius: 14px; margin: 14px 0; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+    .small { font-size: 13px; color: var(--muted); }
+    #plot { width: 100%; height: 420px; }
+    .grid2 { display: grid; grid-template-columns: 1fr; gap: 10px; }
+    @media (min-width: 900px) { .grid2 { grid-template-columns: 1fr 1fr; } }
+    .err { color: #b00020; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <h1>Boston Tide Height (NOAA predictions)</h1>
+
+  <div class="card">
+    <div class="row">
+      <label>
+        Date (Boston)
+        <input id="date" type="date" />
+      </label>
+      <label>
+        Time
+        <input id="time" type="time" step="60" />
+      </label>
+      <label>
+        Datum
+        <select id="datum">
+          <option value="MLLW" selected>MLLW (chart datum)</option>
+          <option value="MSL">MSL</option>
+          <option value="NAVD">NAVD</option>
+        </select>
+      </label>
+      <label>
+        Units
+        <select id="units">
+          <option value="english" selected>Feet</option>
+          <option value="metric">Meters</option>
+        </select>
+      </label>
+      <button id="btn">Get tide</button>
+    </div>
+
+    <div id="status" class="small" style="margin-top:10px;"></div>
+    <div id="result" class="mono" style="margin-top:10px;"></div>
+    <div id="error" class="err" style="margin-top:10px;"></div>
+  </div>
+
+  <div class="card">
+    <div id="plot"></div>
+    <div class="small" style="margin-top:10px;">
+      Station: <span class="mono">8443970</span> (Boston, MA). Time zone: <span class="mono">lst_ldt</span> (local time with DST).
+    </div>
+  </div>
+
+  <script>
+    // ---------- Config ----------
+    const STATION = "8443970"; // Boston, MA
+    const NOAA = "https://api.tidesandcurrents.noaa.gov/api/prod/datagetter";
+    const INTERVAL_MIN = 6; // 6-minute predictions for smooth curve
+
+    // ---------- Helpers ----------
+    const pad2 = (n) => String(n).padStart(2, "0");
+
+    function todayISO() {
+      // User is in America/New_York; Boston shares the same offset rules.
+      const d = new Date();
+      return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
+    }
+
+    function nowHHMM() {
+      const d = new Date();
+      return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+    }
+
+    function ymdCompact(isoDate) {
+      // "YYYY-MM-DD" -> "YYYYMMDD"
+      return isoDate.replaceAll("-", "");
+    }
+
+    function parseNOAATimeLocal(tStr) {
+      // NOAA returns "YYYY-MM-DD HH:MM" (no timezone tag, but it's in lst_ldt we requested).
+      // We parse as local time (user local) which matches Boston local.
+      const [d, hm] = tStr.split(" ");
+      const [Y, M, D] = d.split("-").map(Number);
+      const [h, m] = hm.split(":").map(Number);
+      return new Date(Y, M - 1, D, h, m, 0, 0);
+    }
+
+    function toUserDateTime(isoDate, hhmm) {
+      const [Y, M, D] = isoDate.split("-").map(Number);
+      const [h, m] = hhmm.split(":").map(Number);
+      return new Date(Y, M - 1, D, h, m, 0, 0);
+    }
+
+    function fmtLocal(dt) {
+      // readable local timestamp
+      const Y = dt.getFullYear();
+      const M = pad2(dt.getMonth()+1);
+      const D = pad2(dt.getDate());
+      const h = pad2(dt.getHours());
+      const m = pad2(dt.getMinutes());
+      return `${Y}-${M}-${D} ${h}:${m}`;
+    }
+
+    function linearInterpolate(t0, v0, t1, v1, t) {
+      const x0 = t0.getTime(), x1 = t1.getTime(), x = t.getTime();
+      if (x1 === x0) return v0;
+      const w = (x - x0) / (x1 - x0);
+      return v0 + w * (v1 - v0);
+    }
+
+    async function fetchNOAA(params) {
+      const url = new URL(NOAA);
+      Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
+      const resp = await fetch(url.toString());
+      if (!resp.ok) throw new Error(`NOAA HTTP ${resp.status}`);
+      const data = await resp.json();
+      // If NOAA returns an error, it often includes an "error" field.
+      if (data.error) throw new Error(`NOAA error: ${data.error?.message || JSON.stringify(data.error)}`);
+      return data;
+    }
+
+    async function fetchDayCurve({ isoDate, datum, units }) {
+      const ymd = ymdCompact(isoDate);
+      const data = await fetchNOAA({
+        product: "predictions",
+        application: "boston-tides-ghpages",
+        station: STATION,
+        begin_date: `${ymd} 00:00`,
+        end_date: `${ymd} 23:59`,
+        datum,
+        time_zone: "lst_ldt",
+        units,
+        interval: String(INTERVAL_MIN),
+        format: "json"
+      });
+      if (!data.predictions) throw new Error("No predictions returned.");
+      const pts = data.predictions.map(p => ({
+        tStr: p.t,
+        t: parseNOAATimeLocal(p.t),
+        v: Number(p.v)
+      })).sort((a,b) => a.t - b.t);
+
+      return pts;
+    }
+
+    async function fetchDayHiLo({ isoDate, datum, units }) {
+      const ymd = ymdCompact(isoDate);
+      const data = await fetchNOAA({
+        product: "predictions",
+        application: "boston-tides-ghpages",
+        station: STATION,
+        begin_date: `${ymd} 00:00`,
+        end_date: `${ymd} 23:59`,
+        datum,
+        time_zone: "lst_ldt",
+        units,
+        interval: "hilo",
+        format: "json"
+      });
+      const hilo = (data.predictions || []).map(p => ({
+        tStr: p.t,
+        t: parseNOAATimeLocal(p.t),
+        v: Number(p.v),
+        type: p.type // "H" or "L"
+      })).sort((a,b) => a.t - b.t);
+
+      return hilo;
+    }
+
+    function tideAtTime(pts, target) {
+      // Finds nearest bracketing points and interpolates; also returns nearest point.
+      if (!pts.length) throw new Error("Empty predictions array.");
+
+      // If target out of range, clamp to endpoints
+      if (target <= pts[0].t) return { method: "clamped", t: target, v: pts[0].v, nearest: pts[0] };
+      if (target >= pts[pts.length - 1].t) return { method: "clamped", t: target, v: pts[pts.length - 1].v, nearest: pts[pts.length - 1] };
+
+      // Binary search for right index
+      let lo = 0, hi = pts.length - 1;
+      while (lo + 1 < hi) {
+        const mid = (lo + hi) >> 1;
+        if (pts[mid].t <= target) lo = mid;
+        else hi = mid;
+      }
+      const p0 = pts[lo], p1 = pts[hi];
+      const v = linearInterpolate(p0.t, p0.v, p1.t, p1.v, target);
+
+      // nearest point (for display)
+      const nearest = (Math.abs(p0.t - target) <= Math.abs(p1.t - target)) ? p0 : p1;
+
+      // rising/falling estimate (local slope)
+      const trend = (p1.v > p0.v) ? "rising" : (p1.v < p0.v ? "falling" : "flat");
+
+      return { method: "interpolated", t: target, v, nearest, bracket: [p0, p1], trend };
+    }
+
+    function unitLabel(units) {
+      return units === "metric" ? "m" : "ft";
+    }
+
+    function findNextHiLo(hilo, target) {
+      const next = hilo.find(x => x.t > target) || null;
+      const prev = [...hilo].reverse().find(x => x.t <= target) || null;
+      return { prev, next };
+    }
+
+    function clearUI() {
+      document.getElementById("error").textContent = "";
+      document.getElementById("result").textContent = "";
+      document.getElementById("status").textContent = "";
+    }
+
+    function setStatus(msg) {
+      document.getElementById("status").textContent = msg;
+    }
+
+    function setError(err) {
+      document.getElementById("error").textContent = String(err?.message || err);
+    }
+
+    function plotDay({ pts, hilo, target, targetVal, units }) {
+      const xs = pts.map(p => p.t);
+      const ys = pts.map(p => p.v);
+
+      const hi = hilo.filter(x => x.type === "H");
+      const lo = hilo.filter(x => x.type === "L");
+
+      const traces = [
+        {
+          x: xs,
+          y: ys,
+          mode: "lines",
+          name: "Tide (predicted)",
+          hovertemplate: "%{x|%Y-%m-%d %H:%M}<br>%{y:.2f} " + unitLabel(units) + "<extra></extra>"
+        },
+        {
+          x: hi.map(p => p.t),
+          y: hi.map(p => p.v),
+          mode: "markers",
+          name: "High",
+          marker: { size: 9, symbol: "triangle-up" },
+          hovertemplate: "High<br>%{x|%Y-%m-%d %H:%M}<br>%{y:.2f} " + unitLabel(units) + "<extra></extra>"
+        },
+        {
+          x: lo.map(p => p.t),
+          y: lo.map(p => p.v),
+          mode: "markers",
+          name: "Low",
+          marker: { size: 9, symbol: "triangle-down" },
+          hovertemplate: "Low<br>%{x|%Y-%m-%d %H:%M}<br>%{y:.2f} " + unitLabel(units) + "<extra></extra>"
+        },
+        {
+          x: [target],
+          y: [targetVal],
+          mode: "markers",
+          name: "Selected time",
+          marker: { size: 11, symbol: "circle" },
+          hovertemplate: "Selected<br>%{x|%Y-%m-%d %H:%M}<br>%{y:.2f} " + unitLabel(units) + "<extra></extra>"
+        }
+      ];
+
+      const layout = {
+        margin: { l: 60, r: 20, t: 20, b: 50 },
+        xaxis: { title: "Local time (Boston)", type: "date" },
+        yaxis: { title: `Height (${unitLabel(units)})` },
+        legend: { orientation: "h", y: -0.2 },
+        hovermode: "x unified",
+        shapes: [
+          // vertical line at selected time
+          {
+            type: "line",
+            x0: target, x1: target,
+            y0: Math.min(...ys), y1: Math.max(...ys),
+            xref: "x", yref: "y",
+            line: { width: 2 }
+          }
+        ]
+      };
+
+      Plotly.newPlot("plot", traces, layout, { responsive: true, displaylogo: false });
+    }
+
+    // ---------- Main ----------
+    const dateEl = document.getElementById("date");
+    const timeEl = document.getElementById("time");
+    const btn = document.getElementById("btn");
+
+    dateEl.value = todayISO();
+    timeEl.value = nowHHMM();
+
+    btn.addEventListener("click", async () => {
+      clearUI();
+      btn.disabled = true;
+
+      try {
+        const isoDate = dateEl.value;
+        const hhmm = timeEl.value;
+        const datum = document.getElementById("datum").value;
+        const units = document.getElementById("units").value;
+
+        if (!isoDate) throw new Error("Pick a date.");
+        if (!hhmm) throw new Error("Pick a time.");
+
+        const target = toUserDateTime(isoDate, hhmm);
+        setStatus("Fetching NOAA predictions…");
+
+        // One call for curve + one for high/low markers (still tiny)
+        const [pts, hilo] = await Promise.all([
+          fetchDayCurve({ isoDate, datum, units }),
+          fetchDayHiLo({ isoDate, datum, units })
+        ]);
+
+        const at = tideAtTime(pts, target);
+        const { prev, next } = findNextHiLo(hilo, target);
+
+        const u = unitLabel(units);
+        const val = at.v;
+
+        const lines = [];
+        lines.push(`Selected: ${fmtLocal(target)}`);
+        lines.push(`Tide height: ${val.toFixed(2)} ${u} (${at.method}${at.trend ? `, ${at.trend}` : ""})`);
+        if (at.nearest) lines.push(`Nearest NOAA point: ${at.nearest.tStr} → ${at.nearest.v.toFixed(2)} ${u}`);
+        if (prev) lines.push(`Previous: ${prev.type === "H" ? "High" : "Low"} @ ${prev.tStr} → ${prev.v.toFixed(2)} ${u}`);
+        if (next) lines.push(`Next: ${next.type === "H" ? "High" : "Low"} @ ${next.tStr} → ${next.v.toFixed(2)} ${u}`);
+
+        document.getElementById("result").textContent = lines.join("\n");
+
+        plotDay({ pts, hilo, target, targetVal: val, units });
+
+        setStatus("Done.");
+      } catch (e) {
+        setStatus("");
+        setError(e);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    // Optional: auto-run once on load
+    btn.click();
+  </script>
+</body>
+</html>
