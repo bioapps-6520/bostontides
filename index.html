@@ -17,17 +17,34 @@
     .card { background: var(--card); padding: 14px; border-radius: 14px; margin: 14px 0; }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
     .small { font-size: 13px; color: var(--muted); }
-    #plot {
+    .err { color: #b00020; white-space: pre-wrap; }
+
+    /* Plot wrapper lets us put an overlay on top */
+    .plotWrap{
+      position: relative;
       width: 100%;
       height: 420px;
-      /* Most reliable way to stop touch gestures turning into zoom/select on mobile */
-      touch-action: none;
-      -ms-touch-action: none;
+      border-radius: 12px;
+      overflow: hidden;
+      background: #fff;
+    }
+    #plot{
+      width: 100%;
+      height: 100%;
+    }
+
+    /* The overlay captures touch/mouse so Plotly never gets drag gestures */
+    #overlay{
+      position:absolute;
+      inset:0;
+      z-index: 10;
+      background: rgba(0,0,0,0);
+      touch-action: none;      /* critical: no browser/plot gestures here */
       user-select: none;
       -webkit-user-select: none;
       -webkit-tap-highlight-color: rgba(0,0,0,0);
+      cursor: crosshair;
     }
-    .err { color: #b00020; white-space: pre-wrap; }
   </style>
 </head>
 <body>
@@ -67,9 +84,13 @@
   </div>
 
   <div class="card">
-    <div id="plot"></div>
+    <div class="plotWrap">
+      <div id="plot"></div>
+      <div id="overlay" aria-label="Scrub overlay"></div>
+    </div>
     <div class="small" style="margin-top:10px;">
-      Station: <span class="mono">8443970</span> (Boston, MA). Tap the curve to show the value. (Zoom/pan/selection disabled.)
+      Station: <span class="mono">8443970</span> (Boston, MA).
+      Drag your finger/mouse over the chart to scrub time (zoom/selection disabled).
     </div>
   </div>
 
@@ -77,7 +98,12 @@
     // ---------- Config ----------
     const STATION = "8443970"; // Boston, MA
     const NOAA = "https://api.tidesandcurrents.noaa.gov/api/prod/datagetter";
-    const INTERVAL_MIN = 6; // 6-minute predictions for smooth curve
+    const INTERVAL_MIN = 6;
+
+    // Current plot data (used by scrub overlay)
+    let CURRENT_PTS = [];   // [{t: Date, v: number, tStr: string}]
+    let CURRENT_UNITS = "english";
+    let CURRENT_DATE = null;
 
     // ---------- Helpers ----------
     const pad2 = (n) => String(n).padStart(2, "0");
@@ -86,13 +112,9 @@
       const d = new Date();
       return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
     }
-
-    function ymdCompact(isoDate) {
-      return isoDate.replaceAll("-", "");
-    }
+    function ymdCompact(isoDate) { return isoDate.replaceAll("-", ""); }
 
     function parseNOAATimeLocal(tStr) {
-      // NOAA returns "YYYY-MM-DD HH:MM" in lst_ldt (local time w/ DST).
       const [d, hm] = tStr.split(" ");
       const [Y, M, D] = d.split("-").map(Number);
       const [h, m] = hm.split(":").map(Number);
@@ -120,6 +142,8 @@
       const w = (x - x0) / (x1 - x0);
       return v0 + w * (v1 - v0);
     }
+
+    function unitLabel(units) { return units === "metric" ? "m" : "ft"; }
 
     async function fetchNOAA(params) {
       const url = new URL(NOAA);
@@ -166,13 +190,12 @@
         format: "json"
       });
       return (data.predictions || [])
-        .map(p => ({ tStr: p.t, t: parseNOAATimeLocal(p.t), v: Number(p.v), type: p.type })) // H/L
+        .map(p => ({ tStr: p.t, t: parseNOAATimeLocal(p.t), v: Number(p.v), type: p.type }))
         .sort((a,b) => a.t - b.t);
     }
 
     function tideAtTime(pts, target) {
       if (!pts.length) throw new Error("Empty predictions array.");
-
       if (target <= pts[0].t) return { method: "clamped", t: target, v: pts[0].v, nearest: pts[0], trend: null };
       if (target >= pts[pts.length - 1].t) return { method: "clamped", t: target, v: pts[pts.length - 1].v, nearest: pts[pts.length - 1], trend: null };
 
@@ -184,15 +207,9 @@
       }
       const p0 = pts[lo], p1 = pts[hi];
       const v = linearInterpolate(p0.t, p0.v, p1.t, p1.v, target);
-
       const nearest = (Math.abs(p0.t - target) <= Math.abs(p1.t - target)) ? p0 : p1;
       const trend = (p1.v > p0.v) ? "rising" : (p1.v < p0.v ? "falling" : "flat");
-
       return { method: "interpolated", t: target, v, nearest, bracket: [p0, p1], trend };
-    }
-
-    function unitLabel(units) {
-      return units === "metric" ? "m" : "ft";
     }
 
     function findNextHiLo(hilo, target) {
@@ -203,19 +220,17 @@
 
     function clearUI() {
       document.getElementById("error").textContent = "";
-      document.getElementById("result").textContent = "";
       document.getElementById("status").textContent = "";
     }
+    function setStatus(msg) { document.getElementById("status").textContent = msg; }
+    function setError(err) { document.getElementById("error").textContent = String(err?.message || err); }
 
-    function setStatus(msg) {
-      document.getElementById("status").textContent = msg;
-    }
+    // ---------- Plot + scrub overlay ----------
+    function plotDay({ pts, hilo, target, targetVal, units, isoDate }) {
+      CURRENT_PTS = pts;
+      CURRENT_UNITS = units;
+      CURRENT_DATE = isoDate;
 
-    function setError(err) {
-      document.getElementById("error").textContent = String(err?.message || err);
-    }
-
-    function plotDay({ pts, hilo, target, targetVal, units }) {
       const xs = pts.map(p => p.t);
       const ys = pts.map(p => p.v);
 
@@ -223,52 +238,19 @@
       const lo = hilo.filter(x => x.type === "L");
 
       const traces = [
-        {
-          x: xs,
-          y: ys,
-          mode: "lines",
-          name: "Tide (predicted)",
-          hovertemplate: "%{x|%Y-%m-%d %H:%M}<br>%{y:.2f} " + unitLabel(units) + "<extra></extra>"
-        },
-        {
-          x: hi.map(p => p.t),
-          y: hi.map(p => p.v),
-          mode: "markers",
-          name: "High",
-          marker: { size: 9, symbol: "triangle-up" },
-          hovertemplate: "High<br>%{x|%Y-%m-%d %H:%M}<br>%{y:.2f} " + unitLabel(units) + "<extra></extra>"
-        },
-        {
-          x: lo.map(p => p.t),
-          y: lo.map(p => p.v),
-          mode: "markers",
-          name: "Low",
-          marker: { size: 9, symbol: "triangle-down" },
-          hovertemplate: "Low<br>%{x|%Y-%m-%d %H:%M}<br>%{y:.2f} " + unitLabel(units) + "<extra></extra>"
-        },
-        {
-          x: [target],
-          y: [targetVal],
-          mode: "markers",
-          name: "Selected time",
-          marker: { size: 11, symbol: "circle" },
-          hovertemplate: "Selected<br>%{x|%Y-%m-%d %H:%M}<br>%{y:.2f} " + unitLabel(units) + "<extra></extra>"
-        }
+        { x: xs, y: ys, mode: "lines", name: "Tide (predicted)" },
+        { x: hi.map(p=>p.t), y: hi.map(p=>p.v), mode:"markers", name:"High", marker:{size:9, symbol:"triangle-up"} },
+        { x: lo.map(p=>p.t), y: lo.map(p=>p.v), mode:"markers", name:"Low",  marker:{size:9, symbol:"triangle-down"} },
+        { x: [target], y: [targetVal], mode:"markers", name:"Selected time", marker:{size:11, symbol:"circle"} }
       ];
 
       const layout = {
-        margin: { l: 60, r: 20, t: 20, b: 60 },
+        margin: { l: 60, r: 20, t: 10, b: 60 },
         xaxis: { title: "Local time (Boston)", type: "date", fixedrange: true },
         yaxis: { title: `Height (${unitLabel(units)})`, fixedrange: true },
         legend: { orientation: "h", y: -0.25 },
-        hovermode: "x unified",
-
-        // Completely disable drag interactions (zoom/pan/box select)
-        dragmode: false,
-
-        // Also disable selection UI explicitly
-        selectdirection: "h",
-
+        hovermode: false,     // we implement our own hover/scrub
+        dragmode: false,      // no zoom/pan/select
         shapes: [
           {
             type: "line",
@@ -280,49 +262,95 @@
         ]
       };
 
+      // Plotly is now “display-only”; overlay handles interaction
       Plotly.newPlot("plot", traces, layout, {
         responsive: true,
+        displayModeBar: false,  // remove toolbar entirely
         displaylogo: false,
-        displayModeBar: false,   // removes the entire top toolbar
-        modeBarButtonsToRemove: [
-          "zoom2d","pan2d","select2d","lasso2d",
-          "zoomIn2d","zoomOut2d","autoScale2d","resetScale2d",
-          "toImage"
-        ],
-        scrollZoom: false,
-        staticPlot: false,       // keep hover/click; CSS touch-action handles mobile gestures
-        doubleClick: false,
-        showTips: false
+        staticPlot: true        // key: disables Plotly gestures (zoom/select) completely
       });
 
+      // After staticPlot, Plotly won't show hover/tooltips. We "scrub" ourselves.
+      installScrubOverlay();
+    }
+
+    function installScrubOverlay() {
+      const overlay = document.getElementById("overlay");
       const plotDiv = document.getElementById("plot");
-      if (typeof plotDiv.removeAllListeners === "function") {
-        plotDiv.removeAllListeners("plotly_click");
+      const resEl = document.getElementById("result");
+
+      // Avoid stacking listeners if plot re-renders
+      overlay.onpointerdown = overlay.onpointermove = overlay.onpointerup = null;
+      overlay.ontouchstart = overlay.ontouchmove = overlay.ontouchend = null;
+      overlay.onmousemove = overlay.onmouseleave = null;
+
+      function nearestIndexForX(xDate) {
+        // binary search on CURRENT_PTS times
+        const x = xDate.getTime();
+        const pts = CURRENT_PTS;
+        let lo = 0, hi = pts.length - 1;
+        while (lo + 1 < hi) {
+          const mid = (lo + hi) >> 1;
+          if (pts[mid].t.getTime() <= x) lo = mid;
+          else hi = mid;
+        }
+        const a = pts[lo], b = pts[hi];
+        return (Math.abs(a.t.getTime() - x) <= Math.abs(b.t.getTime() - x)) ? lo : hi;
       }
 
-      // Tap/click shows value + moves vertical cursor line.
-      plotDiv.on("plotly_click", (ev) => {
-        if (!ev.points || !ev.points.length) return;
+      function scrubAtClientX(clientX) {
+        if (!CURRENT_PTS.length || !plotDiv._fullLayout) return;
 
-        const pt = ev.points.find(p => p.data && p.data.name === "Tide (predicted)") || ev.points[0];
+        const rect = overlay.getBoundingClientRect();
+        const xpx = clientX - rect.left;
 
-        const dt = new Date(pt.x);
-        const y = Number(pt.y);
-        const u = unitLabel(units);
+        // Convert pixel -> data using Plotly's xaxis mapping
+        const xaxis = plotDiv._fullLayout.xaxis;
+        const xDate = new Date(xaxis.p2d(xpx));
 
+        // Clamp to day range
+        const minT = CURRENT_PTS[0].t;
+        const maxT = CURRENT_PTS[CURRENT_PTS.length - 1].t;
+        const clamped = new Date(Math.min(maxT.getTime(), Math.max(minT.getTime(), xDate.getTime())));
+
+        const idx = nearestIndexForX(clamped);
+        const pt = CURRENT_PTS[idx];
+
+        const u = unitLabel(CURRENT_UNITS);
         const tappedText =
-          `Tapped: ${fmtLocal(dt)}\n` +
-          `Tide height: ${y.toFixed(2)} ${u}`;
+          `Scrub: ${fmtLocal(pt.t)}\n` +
+          `Tide height: ${pt.v.toFixed(2)} ${u}`;
 
-        const resEl = document.getElementById("result");
-        const base = (resEl.textContent || "").split("\n\nTapped:")[0];
+        const base = (resEl.textContent || "").split("\n\nScrub:")[0].split("\n\nTapped:")[0];
         resEl.textContent = (base ? base + "\n\n" : "") + tappedText;
 
+        // Move the vertical cursor line & move the selected marker
+        // shapes[0] is the vertical line; trace[3] is "Selected time"
         Plotly.relayout(plotDiv, {
-          "shapes[0].x0": dt,
-          "shapes[0].x1": dt
+          "shapes[0].x0": pt.t,
+          "shapes[0].x1": pt.t
         });
-      });
+        Plotly.restyle(plotDiv, { x: [[pt.t]], y: [[pt.v]] }, [3]);
+      }
+
+      // Pointer events (covers modern iOS too)
+      overlay.addEventListener("pointerdown", (e) => {
+        e.preventDefault();
+        scrubAtClientX(e.clientX);
+        overlay.setPointerCapture?.(e.pointerId);
+      }, { passive: false });
+
+      overlay.addEventListener("pointermove", (e) => {
+        e.preventDefault();
+        scrubAtClientX(e.clientX);
+      }, { passive: false });
+
+      overlay.addEventListener("pointerup", (e) => {
+        e.preventDefault();
+      }, { passive: false });
+
+      // Desktop fallback: hover scrub
+      overlay.addEventListener("mousemove", (e) => scrubAtClientX(e.clientX));
     }
 
     // ---------- Main ----------
@@ -367,7 +395,7 @@
 
         document.getElementById("result").textContent = lines.join("\n");
 
-        plotDay({ pts, hilo, target, targetVal: at.v, units });
+        plotDay({ pts, hilo, target, targetVal: at.v, units, isoDate });
 
         setStatus("Done.");
       } catch (e) {
