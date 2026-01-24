@@ -62,7 +62,7 @@
     <div class="small" style="margin-top:10px;">
       Station: <span class="mono">8443970</span> (Boston, MA). Time zone: <span class="mono">lst_ldt</span> (local time with DST).
       <br/>
-      Tip: on mobile, tap the curve to show the value.
+      Tip: on mobile, tap the curve to show the value (zoom/pan disabled).
     </div>
   </div>
 
@@ -85,8 +85,8 @@
     }
 
     function parseNOAATimeLocal(tStr) {
-      // NOAA returns "YYYY-MM-DD HH:MM" (no timezone tag, but it's in lst_ldt we requested).
-      // Parse as local time; Boston matches user's local offset if you're in ET.
+      // NOAA returns "YYYY-MM-DD HH:MM" in lst_ldt (local time w/ DST).
+      // Parse as local time; for ET users this matches Boston time.
       const [d, hm] = tStr.split(" ");
       const [Y, M, D] = d.split("-").map(Number);
       const [h, m] = hm.split(":").map(Number);
@@ -253,10 +253,14 @@
 
       const layout = {
         margin: { l: 60, r: 20, t: 20, b: 60 },
-        xaxis: { title: "Local time (Boston)", type: "date" },
-        yaxis: { title: `Height (${unitLabel(units)})` },
+        xaxis: { title: "Local time (Boston)", type: "date", fixedrange: true },
+        yaxis: { title: `Height (${unitLabel(units)})`, fixedrange: true },
         legend: { orientation: "h", y: -0.25 },
         hovermode: "x unified",
+
+        // Critical: disable touch drag-to-zoom / pan
+        dragmode: false,
+
         shapes: [
           // vertical line at selected time
           {
@@ -272,8 +276,9 @@
       Plotly.newPlot("plot", traces, layout, {
         responsive: true,
         displaylogo: false,
-        scrollZoom: false,   // disables scroll-to-zoom (mobile friendly)
-        doubleClick: "reset", // double-tap resets
+        displayModeBar: false,
+        scrollZoom: false,
+        doubleClick: "reset",
         showTips: false
       });
 
