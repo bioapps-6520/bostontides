@@ -20,7 +20,12 @@
     #plot {
       width: 100%;
       height: 420px;
-      touch-action: pan-y; /* key: allow vertical page scroll, disable plot swipe/zoom gestures */
+      /* Most reliable way to stop touch gestures turning into zoom/select on mobile */
+      touch-action: none;
+      -ms-touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-tap-highlight-color: rgba(0,0,0,0);
     }
     .err { color: #b00020; white-space: pre-wrap; }
   </style>
@@ -64,9 +69,7 @@
   <div class="card">
     <div id="plot"></div>
     <div class="small" style="margin-top:10px;">
-      Station: <span class="mono">8443970</span> (Boston, MA). Time zone: <span class="mono">lst_ldt</span> (local time with DST).
-      <br/>
-      Tip: tap the curve to show the value (zoom/pan disabled).
+      Station: <span class="mono">8443970</span> (Boston, MA). Tap the curve to show the value. (Zoom/pan/selection disabled.)
     </div>
   </div>
 
@@ -173,7 +176,6 @@
       if (target <= pts[0].t) return { method: "clamped", t: target, v: pts[0].v, nearest: pts[0], trend: null };
       if (target >= pts[pts.length - 1].t) return { method: "clamped", t: target, v: pts[pts.length - 1].v, nearest: pts[pts.length - 1], trend: null };
 
-      // binary search for bracketing points
       let lo = 0, hi = pts.length - 1;
       while (lo + 1 < hi) {
         const mid = (lo + hi) >> 1;
@@ -261,11 +263,13 @@
         legend: { orientation: "h", y: -0.25 },
         hovermode: "x unified",
 
-        // Disable drag interactions (prevents swipe-zoom/pan)
+        // Completely disable drag interactions (zoom/pan/box select)
         dragmode: false,
 
+        // Also disable selection UI explicitly
+        selectdirection: "h",
+
         shapes: [
-          // vertical line at selected time
           {
             type: "line",
             x0: target, x1: target,
@@ -279,19 +283,24 @@
       Plotly.newPlot("plot", traces, layout, {
         responsive: true,
         displaylogo: false,
-        displayModeBar: false,
+        displayModeBar: false,   // removes the entire top toolbar
+        modeBarButtonsToRemove: [
+          "zoom2d","pan2d","select2d","lasso2d",
+          "zoomIn2d","zoomOut2d","autoScale2d","resetScale2d",
+          "toImage"
+        ],
         scrollZoom: false,
-        doubleClick: "reset",
+        staticPlot: false,       // keep hover/click; CSS touch-action handles mobile gestures
+        doubleClick: false,
         showTips: false
       });
 
-      // Tap/click shows value + moves vertical cursor line.
       const plotDiv = document.getElementById("plot");
-
       if (typeof plotDiv.removeAllListeners === "function") {
         plotDiv.removeAllListeners("plotly_click");
       }
 
+      // Tap/click shows value + moves vertical cursor line.
       plotDiv.on("plotly_click", (ev) => {
         if (!ev.points || !ev.points.length) return;
 
