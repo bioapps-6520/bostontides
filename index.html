@@ -45,20 +45,22 @@
     #hoverBox{
       position: fixed;
       z-index: 9999;
-      min-width: 200px;
-      max-width: 280px;
-      padding: 8px 10px;
-      border-radius: 10px;
-      background: rgba(255,255,255,0.96);
+      min-width: 210px;
+      max-width: 300px;
+      padding: 9px 11px;
+      border-radius: 12px;
+      background: rgba(255,255,255,0.97);
       border: 1px solid rgba(0,0,0,0.18);
-      box-shadow: 0 6px 18px rgba(0,0,0,0.12);
+      box-shadow: 0 8px 22px rgba(0,0,0,0.14);
       pointer-events: none;
       display: none;
       font-size: 13px;
       line-height: 1.25;
     }
-    #hoverBox .t { font-weight: 650; }
+    #hoverBox .t { font-weight: 700; }
     #hoverBox .m { color: var(--muted); }
+    #hoverBox .sep { height: 6px; }
+    #hoverBox .tiny { font-size: 12px; color: var(--muted); }
 
     .tableWrap {
       overflow: auto;
@@ -67,7 +69,7 @@
       border-radius: 12px;
       max-height: 360px;
     }
-    table { border-collapse: collapse; width: 100%; min-width: 620px; }
+    table { border-collapse: collapse; width: 100%; min-width: 640px; }
     th, td { border-bottom: 1px solid var(--line); padding: 10px 12px; text-align: left; font-size: 14px; }
     th { position: sticky; top: 0; background: #fff; z-index: 1; }
     td.monoCell { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
@@ -108,7 +110,7 @@
   <div class="card" id="tableSection">
     <div class="row" style="justify-content: space-between;">
       <div>
-        <div style="font-size:16px; font-weight:650;">15-minute table (05:00 → 22:00)</div>
+        <div style="font-size:16px; font-weight:700;">15-minute table (05:00 → 22:00)</div>
         <div class="small" id="tableStatus">Table not generated yet.</div>
       </div>
       <div class="small"><span class="pill" id="tableCount">0 rows</span></div>
@@ -141,9 +143,9 @@
     const TABLE_END_H   = 22;
     const TABLE_STEP_MIN = 15;
 
-    // State (all in FEET for simplicity)
-    let CURVE = [];     // [{t:Date, vFt:number, tStr:string}]
-    let HILO = [];      // [{t:Date, vFt:number, tStr:string, type:'H'|'L'}]
+    // State (feet)
+    let CURVE = [];
+    let HILO = [];
     let YMIN = 0, YMAX = 1;
     let DAY_MAX_HIGH_FT = null;
     let DAY_MAX_HIGH_TIME = null;
@@ -231,7 +233,6 @@
         .sort((a,b) => a.t - b.t);
     }
 
-    // Interpolated curve value (ft) at time
     function tideAtTimeFt(target) {
       const pts = CURVE;
       if (!pts.length) return null;
@@ -256,9 +257,7 @@
         return;
       }
       let best = highs[0];
-      for (const h of highs) {
-        if (h.vFt > best.vFt) best = h;
-      }
+      for (const h of highs) if (h.vFt > best.vFt) best = h;
       DAY_MAX_HIGH_FT = best.vFt;
       DAY_MAX_HIGH_TIME = best.t;
     }
@@ -272,29 +271,18 @@
 
       const xs = CURVE.map(p => p.t);
       const ys = CURVE.map(p => p.vFt);
-
       YMIN = Math.min(...ys);
       YMAX = Math.max(...ys);
 
       const cursorY = tideAtTimeFt(defaultCursorTime);
 
+      const highs = HILO.filter(x=>x.type==="H");
+      const lows  = HILO.filter(x=>x.type==="L");
+
       const traces = [
-        { x: xs, y: ys, mode: "lines", name: "Tide (predicted)" },
-        // show the high/low points (optional but useful)
-        {
-          x: HILO.filter(x=>x.type==="H").map(x=>x.t),
-          y: HILO.filter(x=>x.type==="H").map(x=>x.vFt),
-          mode: "markers",
-          marker: { size: 8, symbol: "triangle-up" },
-          name: "High"
-        },
-        {
-          x: HILO.filter(x=>x.type==="L").map(x=>x.t),
-          y: HILO.filter(x=>x.type==="L").map(x=>x.vFt),
-          mode: "markers",
-          marker: { size: 8, symbol: "triangle-down" },
-          name: "Low"
-        },
+        { x: xs, y: ys, mode: "lines", name: "Tide" },
+        { x: highs.map(x=>x.t), y: highs.map(x=>x.vFt), mode:"markers", name:"High", marker:{size:8, symbol:"triangle-up"} },
+        { x: lows.map(x=>x.t),  y: lows.map(x=>x.vFt),  mode:"markers", name:"Low",  marker:{size:8, symbol:"triangle-down"} },
         { x: [defaultCursorTime], y: [cursorY], mode:"markers", name:"Selected", marker:{size:11, symbol:"circle"} }
       ];
 
@@ -305,15 +293,13 @@
         legend: { orientation: "h", y: -0.25 },
         hovermode: false,
         dragmode: false,
-        shapes: [
-          {
-            type: "line",
-            x0: defaultCursorTime, x1: defaultCursorTime,
-            y0: YMIN, y1: YMAX,
-            xref: "x", yref: "y",
-            line: { width: 2, dash: "dot" }
-          }
-        ]
+        shapes: [{
+          type: "line",
+          x0: defaultCursorTime, x1: defaultCursorTime,
+          y0: YMIN, y1: YMAX,
+          xref: "x", yref: "y",
+          line: { width: 2, dash: "dot" }
+        }]
       };
 
       Plotly.newPlot(plotDiv, traces, layout, {
@@ -343,45 +329,49 @@
 
       let lastX = null, lastY = null, rafPending = false;
 
-      function placeHoverBox(clientX, clientY) {
-        const isTouch = ("ontouchstart" in window) || (navigator.maxTouchPoints > 0);
+      function placeHoverBoxAlwaysAbove(clientX, clientY) {
+        const padX = 16;
+        const padY = 64; // large vertical offset so it doesn't sit under finger
 
-        const padX = isTouch ? 20 : 14;
-        const padY = isTouch ? 34 : 14;
-
+        // Always try ABOVE the finger
         let left = clientX + padX;
-        let top  = isTouch ? (clientY - padY) : (clientY + padY);
+        let top  = clientY - padY;
 
         const rect = hoverBox.getBoundingClientRect();
 
+        // If it goes off right edge, flip to left
         if (left + rect.width + 8 > window.innerWidth) left = clientX - rect.width - padX;
         if (left < 8) left = 8;
 
-        if (top < 8) top = clientY + padY;
-        if (top + rect.height + 8 > window.innerHeight) top = clientY - rect.height - padY;
+        // If above top edge, put it above chart but still visible (cap at 8)
         if (top < 8) top = 8;
 
+        // If still collides with finger near top, we keep it at top=8 (always visible)
         hoverBox.style.left = `${left}px`;
         hoverBox.style.top  = `${top}px`;
       }
 
       function showBox(clientX, clientY, dt, vFt) {
         const vM = ftToM(vFt);
-        let pctTxt = "";
+
+        let pctLine = "";
+        let maxLine = "";
         if (DAY_MAX_HIGH_FT && DAY_MAX_HIGH_FT > 0) {
           const pct = Math.max(0, Math.min(100, 100 * vFt / DAY_MAX_HIGH_FT));
-          pctTxt = ` • ${pct.toFixed(0)}% of day max`;
+          pctLine = ` • ${pct.toFixed(0)}% of day max`;
+          maxLine = `Day max high: ${DAY_MAX_HIGH_FT.toFixed(2)} ft | ${ftToM(DAY_MAX_HIGH_FT).toFixed(2)} m`;
         }
 
         hoverBox.innerHTML =
           `<div class="t">${fmtLocal(dt)}</div>` +
-          `<div>${vFt.toFixed(2)} ft<span class="m">${pctTxt}</span></div>` +
-          `<div class="m">${vM.toFixed(2)} m</div>`;
-        hoverBox.style.display = "block";
-        placeHoverBox(clientX, clientY);
-      }
+          `<div>${vFt.toFixed(2)} ft<span class="m">${pctLine}</span></div>` +
+          `<div class="m">${vM.toFixed(2)} m</div>` +
+          `<div class="sep"></div>` +
+          `<div class="tiny">${maxLine}</div>`;
 
-      function hideBox() { hoverBox.style.display = "none"; }
+        hoverBox.style.display = "block";
+        placeHoverBoxAlwaysAbove(clientX, clientY);
+      }
 
       function doScrub(clientX, clientY) {
         if (!CURVE.length || !plotDiv._fullLayout) return;
@@ -402,7 +392,6 @@
           "shapes[0].x0": clamped,
           "shapes[0].x1": clamped
         });
-        // selected marker trace index is last one (3)
         Plotly.restyle(plotDiv, { x: [[clamped]], y: [[vFt]] }, [3]);
 
         showBox(clientX, clientY, clamped, vFt);
@@ -418,6 +407,7 @@
         });
       }
 
+      // Pointer events
       overlay.addEventListener("pointerdown", (e) => {
         e.preventDefault();
         overlay.setPointerCapture?.(e.pointerId);
@@ -429,13 +419,13 @@
         schedule(e.clientX, e.clientY);
       }, { passive:false });
 
-      overlay.addEventListener("pointerleave", hideBox);
-      overlay.addEventListener("pointercancel", hideBox);
+      // On desktop, hide when leaving plot area; on touch, we keep last position (do nothing on touchend)
+      overlay.addEventListener("mouseleave", () => {
+        // Hide only for mouse users (hover behavior)
+        if (navigator.maxTouchPoints === 0) hoverBox.style.display = "none";
+      });
 
-      overlay.addEventListener("mouseenter", (e) => schedule(e.clientX, e.clientY));
-      overlay.addEventListener("mousemove", (e) => schedule(e.clientX, e.clientY));
-      overlay.addEventListener("mouseleave", hideBox);
-
+      // iOS fallback touch events
       overlay.addEventListener("touchstart", (e) => {
         e.preventDefault();
         const t = e.touches[0];
@@ -446,6 +436,11 @@
         e.preventDefault();
         const t = e.touches[0];
         schedule(t.clientX, t.clientY);
+      }, { passive:false });
+
+      // touchend: intentionally keep tooltip visible at last position
+      overlay.addEventListener("touchend", (e) => {
+        // no-op (keeps last tooltip)
       }, { passive:false });
     }
 
@@ -522,7 +517,7 @@
       document.getElementById("summary").textContent = "";
 
       try {
-        const cacheKey = `bostontides_${isoDate}_feet_mllw`;
+        const cacheKey = `bostontides_${isoDate}_feet_mllw_curve+hilo`;
         const cached = sessionStorage.getItem(cacheKey);
         if (cached) {
           const obj = JSON.parse(cached);
@@ -554,7 +549,7 @@
       }
     }
 
-    // Initialize
+    // Init
     dateEl.value = todayISO();
     dateEl.addEventListener("change", () => loadDate(dateEl.value));
     loadDate(dateEl.value);
