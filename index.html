@@ -13,11 +13,13 @@
     label { display: grid; gap: 6px; font-size: 13px; color: var(--muted); }
     input, select, button { font-size: 14px; padding: 10px 12px; border-radius: 10px; border: 1px solid #ddd; background: #fff; }
     button { cursor: pointer; border: 1px solid #ccc; background: #111; color: #fff; }
+    button.secondary { background: #fff; color: #111; }
     button:disabled { opacity: .6; cursor: not-allowed; }
     .card { background: var(--card); padding: 14px; border-radius: 14px; margin: 14px 0; }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; white-space: pre-wrap; }
     .small { font-size: 13px; color: var(--muted); }
     .err { color: #b00020; white-space: pre-wrap; }
+    a { color: inherit; }
 
     .plotWrap{
       position: relative;
@@ -43,7 +45,32 @@
       cursor: crosshair;
     }
 
-    .tableWrap { overflow-x: auto; background:#fff; border:1px solid var(--line); border-radius: 12px; }
+    /* Hover-like tooltip */
+    #hoverBox{
+      position:absolute;
+      z-index: 20;
+      min-width: 170px;
+      max-width: 240px;
+      padding: 8px 10px;
+      border-radius: 10px;
+      background: rgba(255,255,255,0.95);
+      border: 1px solid rgba(0,0,0,0.15);
+      box-shadow: 0 6px 18px rgba(0,0,0,0.12);
+      pointer-events: none;
+      display: none;
+      font-size: 13px;
+      line-height: 1.25;
+    }
+    #hoverBox .t { font-weight: 600; }
+    #hoverBox .m { color: var(--muted); }
+
+    .tableWrap {
+      overflow: auto;
+      background:#fff;
+      border:1px solid var(--line);
+      border-radius: 12px;
+      max-height: 360px; /* so it’s visible on mobile */
+    }
     table { border-collapse: collapse; width: 100%; min-width: 420px; }
     th, td { border-bottom: 1px solid var(--line); padding: 10px 12px; text-align: left; font-size: 14px; }
     th { position: sticky; top: 0; background: #fff; z-index: 1; }
@@ -80,6 +107,7 @@
         </select>
       </label>
       <button id="btn">Get tide</button>
+      <button id="jump" class="secondary" type="button">Jump to table ↓</button>
     </div>
 
     <div id="status" class="small" style="margin-top:10px;"></div>
@@ -91,20 +119,21 @@
     <div class="plotWrap">
       <div id="plot"></div>
       <div id="overlay" aria-label="Scrub overlay"></div>
+      <div id="hoverBox"></div>
     </div>
     <div class="small" style="margin-top:10px;">
       Station: <span class="mono">8443970</span> (Boston, MA).
-      Drag your finger/mouse over the chart to scrub time (zoom/selection disabled).
+      Drag to scrub time (zoom/selection disabled). The floating box shows ft + m.
     </div>
   </div>
 
-  <div class="card">
+  <div class="card" id="tableSection">
     <div class="row" style="justify-content: space-between;">
       <div>
         <div style="font-size:16px; font-weight:600;">15-minute table (05:00 → 22:00)</div>
-        <div class="small">Shows both feet and meters for the selected day.</div>
+        <div class="small">Feet + meters, interpolated from the NOAA curve.</div>
       </div>
-      <div class="small"><span class="pill">Scrub updates the cursor + dot</span></div>
+      <div class="small"><span class="pill" id="tableCount">Table: 0 rows</span></div>
     </div>
 
     <div style="height:10px;"></div>
@@ -124,16 +153,16 @@
 
   <script>
     // ---------- Config ----------
-    const STATION = "8443970"; // Boston, MA
+    const STATION = "8443970";
     const NOAA = "https://api.tidesandcurrents.noaa.gov/api/prod/datagetter";
-    const INTERVAL_MIN = 6; // NOAA curve interval (6-min)
+    const INTERVAL_MIN = 6;
+
     const TABLE_START_H = 5;   // 05:00
     const TABLE_END_H = 22;    // 22:00
-    const TABLE_STEP_MIN = 15; // 15-minute intervals
+    const TABLE_STEP_MIN = 15; // 15-min
 
     // Current plot data (for scrub overlay)
-    let CURRENT_PTS = [];     // curve points in plot-units: [{t:Date, v:number, tStr:string}]
-    let CURRENT_HILO = [];    // hilo points in plot-units
+    let CURRENT_PTS = [];
     let CURRENT_UNITS = "english";
     let CURRENT_DATE = null;
 
@@ -147,7 +176,6 @@
     function ymdCompact(isoDate) { return isoDate.replaceAll("-", ""); }
 
     function parseNOAATimeLocal(tStr) {
-      // NOAA returns "YYYY-MM-DD HH:MM" in lst_ldt (local time with DST).
       const [d, hm] = tStr.split(" ");
       const [Y, M, D] = d.split("-").map(Number);
       const [h, m] = hm.split(":").map(Number);
@@ -168,8 +196,6 @@
       const m = pad2(dt.getMinutes());
       return `${Y}-${M}-${D} ${h}:${m}`;
     }
-
-    function unitLabel(units) { return units === "metric" ? "m" : "ft"; }
 
     function convertHeight(value, fromUnits, toUnits) {
       if (fromUnits === toUnits) return value;
@@ -231,11 +257,10 @@
         format: "json"
       });
       return (data.predictions || [])
-        .map(p => ({ tStr: p.t, t: parseNOAATimeLocal(p.t), v: Number(p.v), type: p.type })) // H/L
+        .map(p => ({ tStr: p.t, t: parseNOAATimeLocal(p.t), v: Number(p.v), type: p.type }))
         .sort((a,b) => a.t - b.t);
     }
 
-    // Interpolated tide at time (in the same units as pts)
     function tideAtTime(pts, target) {
       if (!pts.length) throw new Error("Empty predictions array.");
 
@@ -250,10 +275,8 @@
       }
       const p0 = pts[lo], p1 = pts[hi];
       const v = linearInterpolate(p0.t, p0.v, p1.t, p1.v, target);
-
       const trend = (p1.v > p0.v) ? "rising" : (p1.v < p0.v ? "falling" : "flat");
       const nearest = (Math.abs(p0.t - target) <= Math.abs(p1.t - target)) ? p0 : p1;
-
       return { method: "interpolated", t: target, v, nearest, bracket: [p0, p1], trend };
     }
 
@@ -275,19 +298,18 @@
       const tbody = document.getElementById("tideTableBody");
       tbody.innerHTML = "";
 
-      // Build target times: 05:00 to 22:00 inclusive, every 15 min
       const [Y, M, D] = isoDate.split("-").map(Number);
       const start = new Date(Y, M - 1, D, TABLE_START_H, 0, 0, 0);
-      const end = new Date(Y, M - 1, D, TABLE_END_H, 0, 0, 0);
+      const end   = new Date(Y, M - 1, D, TABLE_END_H, 0, 0, 0);
 
       const frag = document.createDocumentFragment();
+      let n = 0;
 
       for (let t = new Date(start); t <= end; t = new Date(t.getTime() + TABLE_STEP_MIN * 60000)) {
         const at = tideAtTime(pts, t);
-        const vPlotUnits = at.v;
-
-        const vFt = convertHeight(vPlotUnits, ptsUnits, "english");
-        const vM  = convertHeight(vPlotUnits, ptsUnits, "metric");
+        const vPlot = at.v;
+        const vFt = convertHeight(vPlot, ptsUnits, "english");
+        const vM  = convertHeight(vPlot, ptsUnits, "metric");
 
         const tr = document.createElement("tr");
 
@@ -297,26 +319,26 @@
 
         const tdFt = document.createElement("td");
         tdFt.className = "monoCell";
-        tdFt.textContent = `${vFt.toFixed(2)}`;
+        tdFt.textContent = vFt.toFixed(2);
 
         const tdM = document.createElement("td");
         tdM.className = "monoCell";
-        tdM.textContent = `${vM.toFixed(2)}`;
+        tdM.textContent = vM.toFixed(2);
 
         tr.appendChild(tdTime);
         tr.appendChild(tdFt);
         tr.appendChild(tdM);
-
         frag.appendChild(tr);
+        n++;
       }
 
       tbody.appendChild(frag);
+      document.getElementById("tableCount").textContent = `Table: ${n} rows`;
     }
 
-    // ---------- Plot + scrub overlay ----------
+    // ---------- Plot + Scrub (with hover box) ----------
     function plotDay({ pts, hilo, target, targetVal, units, isoDate }) {
       CURRENT_PTS = pts;
-      CURRENT_HILO = hilo;
       CURRENT_UNITS = units;
       CURRENT_DATE = isoDate;
 
@@ -336,7 +358,7 @@
       const layout = {
         margin: { l: 60, r: 20, t: 10, b: 60 },
         xaxis: { title: "Local time (Boston)", type: "date", fixedrange: true },
-        yaxis: { title: `Height (${unitLabel(units)})`, fixedrange: true },
+        yaxis: { title: `Height (${units === "metric" ? "m" : "ft"})`, fixedrange: true },
         legend: { orientation: "h", y: -0.25 },
         hovermode: false,
         dragmode: false,
@@ -346,12 +368,11 @@
             x0: target, x1: target,
             y0: Math.min(...ys), y1: Math.max(...ys),
             xref: "x", yref: "y",
-            line: { width: 2 }
+            line: { width: 2, dash: "dot" }  // dotted like the original
           }
         ]
       };
 
-      // Plotly becomes display-only: no gestures, no modebar
       Plotly.newPlot("plot", traces, layout, {
         responsive: true,
         displayModeBar: false,
@@ -366,18 +387,43 @@
       const overlay = document.getElementById("overlay");
       const plotDiv = document.getElementById("plot");
       const resEl = document.getElementById("result");
+      const hoverBox = document.getElementById("hoverBox");
 
-      // Remove old listeners by replacing the node (clean + reliable)
+      // Replace overlay node to clear old listeners
       const overlayClone = overlay.cloneNode(true);
       overlay.parentNode.replaceChild(overlayClone, overlay);
 
-      function scrubAtClientX(clientX) {
+      function showHoverBox(x, y, html) {
+        hoverBox.innerHTML = html;
+        hoverBox.style.display = "block";
+
+        // offset so the box doesn't sit under your finger
+        const rect = hoverBox.getBoundingClientRect();
+        const pad = 12;
+        let left = x + pad;
+        let top  = y + pad;
+
+        // keep within viewport
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+        if (left + rect.width + 8 > vw) left = x - rect.width - pad;
+        if (top + rect.height + 8 > vh) top = y - rect.height - pad;
+
+        hoverBox.style.left = left + "px";
+        hoverBox.style.top  = top + "px";
+      }
+
+      function hideHoverBox() {
+        hoverBox.style.display = "none";
+      }
+
+      function scrubAtClientX(clientX, clientY) {
         if (!CURRENT_PTS.length || !plotDiv._fullLayout) return;
 
         const rect = overlayClone.getBoundingClientRect();
         const xpx = clientX - rect.left;
 
-        // Pixel -> Date using Plotly’s axis mapping
+        // Pixel -> Date using Plotly axis mapping
         const xaxis = plotDiv._fullLayout.xaxis;
         const xDate = new Date(xaxis.p2d(xpx));
 
@@ -386,56 +432,65 @@
         const maxT = CURRENT_PTS[CURRENT_PTS.length - 1].t;
         const clamped = new Date(Math.min(maxT.getTime(), Math.max(minT.getTime(), xDate.getTime())));
 
-        // Interpolated value at clamped time
         const at = tideAtTime(CURRENT_PTS, clamped);
         const vPlot = at.v;
 
         const vFt = convertHeight(vPlot, CURRENT_UNITS, "english");
         const vM  = convertHeight(vPlot, CURRENT_UNITS, "metric");
 
+        // Update summary block (keeps any initial text above)
+        const base = (resEl.textContent || "").split("\n\nScrub:")[0];
         const scrubText =
-          `Selected: ${fmtLocal(clamped)}\n` +
+          `Scrub: ${fmtLocal(clamped)}\n` +
           `Tide height: ${vFt.toFixed(2)} ft  |  ${vM.toFixed(2)} m`;
-
-        // Keep any earlier lines above; overwrite the visible block cleanly
-        const base = (resEl.textContent || "").split("\n\nSelected:")[0];
         resEl.textContent = (base ? base + "\n\n" : "") + scrubText;
 
-        // Move cursor line and selected dot (trace index 3)
+        // Move dotted cursor line and selected dot (trace 3)
         Plotly.relayout(plotDiv, {
           "shapes[0].x0": clamped,
           "shapes[0].x1": clamped
         });
         Plotly.restyle(plotDiv, { x: [[clamped]], y: [[vPlot]] }, [3]);
+
+        // Floating hover box (Plotly-like)
+        const html =
+          `<div class="t">${fmtLocal(clamped)}</div>` +
+          `<div>${vFt.toFixed(2)} ft</div>` +
+          `<div class="m">${vM.toFixed(2)} m</div>`;
+        showHoverBox(clientX, clientY, html);
       }
 
-      // Pointer events (iOS/Android/desktop)
       overlayClone.addEventListener("pointerdown", (e) => {
         e.preventDefault();
-        scrubAtClientX(e.clientX);
+        scrubAtClientX(e.clientX, e.clientY);
         overlayClone.setPointerCapture?.(e.pointerId);
       }, { passive: false });
 
       overlayClone.addEventListener("pointermove", (e) => {
         e.preventDefault();
-        scrubAtClientX(e.clientX);
+        scrubAtClientX(e.clientX, e.clientY);
       }, { passive: false });
 
       overlayClone.addEventListener("pointerup", (e) => {
         e.preventDefault();
       }, { passive: false });
 
-      // Desktop “hover scrub”
-      overlayClone.addEventListener("mousemove", (e) => scrubAtClientX(e.clientX));
+      overlayClone.addEventListener("pointerleave", () => hideHoverBox());
+      overlayClone.addEventListener("mouseleave", () => hideHoverBox());
     }
 
     // ---------- Main ----------
     const dateEl = document.getElementById("date");
     const timeEl = document.getElementById("time");
     const btn = document.getElementById("btn");
+    const jump = document.getElementById("jump");
 
     dateEl.value = todayISO();
     timeEl.value = "10:00"; // default time = 10 AM
+
+    jump.addEventListener("click", () => {
+      document.getElementById("tableSection").scrollIntoView({ behavior: "smooth", block: "start" });
+    });
 
     btn.addEventListener("click", async () => {
       clearUI();
@@ -458,7 +513,6 @@
           fetchDayHiLo({ isoDate, datum, units })
         ]);
 
-        // Summary at selected time
         const at = tideAtTime(pts, target);
         const { prev, next } = findNextHiLo(hilo, target);
 
@@ -468,28 +522,19 @@
         const lines = [];
         lines.push(`Selected: ${fmtLocal(target)}`);
         lines.push(`Tide height: ${vFt.toFixed(2)} ft  |  ${vM.toFixed(2)} m (${at.method}${at.trend ? `, ${at.trend}` : ""})`);
-        if (at.nearest) {
-          const nFt = convertHeight(at.nearest.v, units, "english");
-          const nM  = convertHeight(at.nearest.v, units, "metric");
-          lines.push(`Nearest NOAA point: ${at.nearest.tStr} → ${nFt.toFixed(2)} ft | ${nM.toFixed(2)} m`);
-        }
         if (prev) {
           const pFt = convertHeight(prev.v, units, "english");
           const pM  = convertHeight(prev.v, units, "metric");
           lines.push(`Previous: ${prev.type === "H" ? "High" : "Low"} @ ${prev.tStr} → ${pFt.toFixed(2)} ft | ${pM.toFixed(2)} m`);
         }
         if (next) {
-          const nFt2 = convertHeight(next.v, units, "english");
-          const nM2  = convertHeight(next.v, units, "metric");
-          lines.push(`Next: ${next.type === "H" ? "High" : "Low"} @ ${next.tStr} → ${nFt2.toFixed(2)} ft | ${nM2.toFixed(2)} m`);
+          const nFt = convertHeight(next.v, units, "english");
+          const nM  = convertHeight(next.v, units, "metric");
+          lines.push(`Next: ${next.type === "H" ? "High" : "Low"} @ ${next.tStr} → ${nFt.toFixed(2)} ft | ${nM.toFixed(2)} m`);
         }
-
         document.getElementById("result").textContent = lines.join("\n");
 
-        // Plot uses selected units; scrub readout always shows ft + m
         plotDay({ pts, hilo, target, targetVal: at.v, units, isoDate });
-
-        // Build the 15-min table (ft + m)
         buildTable({ isoDate, pts, ptsUnits: units });
 
         setStatus("Done.");
@@ -501,7 +546,6 @@
       }
     });
 
-    // Auto-run once on load
     btn.click();
   </script>
 </body>
