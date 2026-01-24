@@ -109,7 +109,7 @@
 
     <div class="kv">
       <div class="line">
-        <span class="k">Conditions (NOAA NDBC buoy 44013 latest):</span>
+        <span class="k">Conditions (NOAA buoy 44013 latest):</span>
         <span class="pill" id="condLine">—</span>
       </div>
       <div class="line">
@@ -124,7 +124,7 @@
 
     <div class="small" style="margin-top:10px;">
       Tide station: <span class="mono">8443970</span> (Boston, MA) • Datum <span class="mono">MLLW</span>.
-      Water temp/wind from offshore buoy <span class="mono">44013</span>.
+      Water temp/wind from buoy <span class="mono">44013</span>.
     </div>
   </div>
 
@@ -173,9 +173,11 @@ const TABLE_START_H = 5;
 const TABLE_END_H = 22;
 const TABLE_STEP_MIN = 15;
 
-// NDBC buoy for water temp/wind/air temp
+// Buoy via ERDDAP (CORS-friendly)
 const NDBC_STATION = "44013";
-const NDBC_REALTIME_TXT = `https://www.ndbc.noaa.gov/data/realtime2/${NDBC_STATION}.txt`;
+const ERDDAP_BASE = "https://data.neracoos.org/erddap/tabledap/NDBC_44013.json";
+const ERDDAP_LATEST =
+  `${ERDDAP_BASE}?time,WTMP,ATMP,WSPD,WDIR&orderByMax(%22time%22)`;
 
 // NWS point (Boston) for forecast (shown only for today)
 const NWS_LAT = 42.3601;
@@ -216,14 +218,9 @@ function degToCardinal(deg){
   return dirs[ix];
 }
 async function fetchJSON(url, headers){
-  const r = await fetch(url, { headers });
+  const r = await fetch(url, { headers, cache:"no-store" });
   if(!r.ok) throw new Error(`HTTP ${r.status}`);
   return await r.json();
-}
-async function fetchText(url){
-  const r = await fetch(url, { cache:"no-store" });
-  if(!r.ok) throw new Error(`HTTP ${r.status}`);
-  return await r.text();
 }
 
 /* ---------------- TIDES ---------------- */
@@ -261,7 +258,6 @@ function tideAtTimeFt(target){
   if(target <= pts[0].t) return pts[0].vFt;
   if(target >= pts[pts.length-1].t) return pts[pts.length-1].vFt;
 
-  // binary search bracket
   let lo=0, hi=pts.length-1;
   while(lo+1<hi){
     const mid=(lo+hi)>>1;
@@ -273,39 +269,38 @@ function tideAtTimeFt(target){
   return p0.vFt + w*(p1.vFt-p0.vFt);
 }
 
-/* ---------------- CONDITIONS (NDBC 44013) ---------------- */
+/* ---------------- CONDITIONS (ERDDAP latest) ---------------- */
 async function updateNDBCConditions(){
   const el = document.getElementById("condLine");
-  el.textContent = "—";
+  el.textContent = "Loading…";
 
   try{
-    const txt = await fetchText(NDBC_REALTIME_TXT);
-    const lines = txt.split(/\r?\n/).filter(Boolean);
-
-    // find header line that contains WTMP or ATMP or WSPD
-    let headerIdx = -1;
-    for(let i=0;i<Math.min(lines.length, 8); i++){
-      if(lines[i].includes("WTMP") || lines[i].includes("ATMP") || lines[i].includes("WSPD")){
-        headerIdx = i; break;
-      }
+    const j = await fetchJSON(ERDDAP_LATEST);
+    const table = j && j.table;
+    const names = table && table.columnNames;
+    const rows  = table && table.rows;
+    if(!names || !rows || !rows.length){
+      el.textContent = "—";
+      return;
     }
-    if(headerIdx === -1) { el.textContent="—"; return; }
 
-    const header = lines[headerIdx].replace(/^#/, "").trim().split(/\s+/);
-    const dataLine = lines[headerIdx+1];
-    if(!dataLine) { el.textContent="—"; return; }
+    const row = rows[0];
+    const idx = (col) => names.indexOf(col);
+    const get = (col) => {
+      const i = idx(col);
+      if(i < 0) return null;
+      const v = row[i];
+      return (v === null || v === undefined) ? null : v;
+    };
 
-    const fields = dataLine.trim().split(/\s+/);
-    const idx = (name) => header.indexOf(name);
-    const get = (i) => (i>=0 && i<fields.length && fields[i] !== "MM") ? fields[i] : null;
+    const tISO = get("time"); // ISO 8601 string
+    const dt = tISO ? new Date(tISO) : null;
+    const ts = dt ? `UTC ${dt.toISOString().slice(0,16).replace("T"," ")}` : "UTC —";
 
-    const YY=get(idx("YY")), MM=get(idx("MM")), DD=get(idx("DD")), hh=get(idx("hh")), mm=get(idx("mm"));
-    const ts = (YY && MM && DD && hh && mm) ? `GMT ${YY}-${MM}-${DD} ${hh}:${mm}` : "GMT —";
-
-    const wtmpC = get(idx("WTMP"));
-    const atmpC = get(idx("ATMP"));
-    const wspd  = get(idx("WSPD")); // m/s in standard NDBC files
-    const wdir  = get(idx("WDIR")); // degrees
+    const wtmpC = get("WTMP");
+    const atmpC = get("ATMP");
+    const wspd  = get("WSPD"); // m/s
+    const wdir  = get("WDIR"); // degrees true
 
     const parts = [];
 
@@ -329,7 +324,6 @@ async function updateNDBCConditions(){
 
     el.textContent = `${parts.join(" | ")}  •  ${ts}`;
   } catch(e){
-    // don't break; just show —
     el.textContent = "—";
   }
 }
@@ -344,10 +338,8 @@ async function updateNWSForecast(selectedISO){
   }
 
   try{
-    const headers = {
-      "Accept": "application/geo+json",
-      "User-Agent": "BostonIrishDippersTides/1.0 (github pages)"
-    };
+    // NOTE: Browsers cannot set User-Agent; keep headers minimal.
+    const headers = { "Accept": "application/geo+json" };
 
     const point = await fetchJSON(`https://api.weather.gov/points/${NWS_LAT},${NWS_LON}`, headers);
     const hourlyUrl = point?.properties?.forecastHourly;
@@ -404,7 +396,6 @@ function renderPlot(){
   const yMin = Math.min(...ys);
   const yMax = Math.max(...ys);
 
-  // default cursor = 10:00 local (do NOT mutate curve times)
   const cursor = new Date(CURVE[0].t);
   cursor.setHours(10,0,0,0);
   const cursorY = tideAtTimeFt(cursor);
@@ -451,7 +442,6 @@ function installScrub(){
     let left = clientX + padX;
     let top  = clientY - padY;
 
-    // keep on screen
     const rect = hoverBox.getBoundingClientRect();
     if(left + rect.width + 8 > window.innerWidth) left = clientX - rect.width - padX;
     if(left < 8) left = 8;
@@ -522,7 +512,6 @@ function installScrub(){
     schedule(e.clientX, e.clientY);
   }, {passive:false});
 
-  // Desktop: hide when leaving. Touch: keep last tooltip.
   overlay.addEventListener("mouseleave", () => {
     if(navigator.maxTouchPoints === 0) hoverBox.style.display = "none";
   });
@@ -537,9 +526,6 @@ function installScrub(){
     const t = e.touches[0];
     schedule(t.clientX, t.clientY);
   }, {passive:false});
-  overlay.addEventListener("touchend", () => {
-    // keep tooltip visible
-  }, {passive:false});
 }
 
 /* ---------------- TABLE ---------------- */
@@ -553,13 +539,13 @@ function buildTable(isoDate){
   count.textContent = "0 rows";
 
   const [Y,M,D] = isoDate.split("-").map(Number);
-  const start = new Date(Y, M-1, D, TABLE_START_H, 0, 0, 0);
-  const end   = new Date(Y, M-1, D, TABLE_END_H, 0, 0, 0);
+  const start = new Date(Y, M-1, D, 5, 0, 0, 0);
+  const end   = new Date(Y, M-1, D, 22, 0, 0, 0);
 
   const frag = document.createDocumentFragment();
   let n = 0;
 
-  for(let t = new Date(start); t <= end; t = new Date(t.getTime() + TABLE_STEP_MIN*60000)){
+  for(let t = new Date(start); t <= end; t = new Date(t.getTime() + 15*60000)){
     const vFt = tideAtTimeFt(t);
     const vM  = ftToM(vFt);
 
@@ -607,14 +593,10 @@ document.getElementById("jump").addEventListener("click", () => {
 });
 
 async function loadDate(isoDate){
-  // update conditions regardless of date
   updateNDBCConditions().catch(()=>{ document.getElementById("condLine").textContent="—"; });
-
-  // forecast only for today
   updateNWSForecast(isoDate).catch(()=>{ document.getElementById("wxLine").textContent="—"; });
 
-  // cache tide data per day
-  const cacheKey = `bid_${isoDate}_coops8443970_curve+hilo_v3`;
+  const cacheKey = `bid_${isoDate}_coops8443970_curve+hilo_v5`;
   const cached = sessionStorage.getItem(cacheKey);
 
   if(cached){
