@@ -1,558 +1,192 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Boston Tides</title>
-  <script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
-  <style>
-    :root { --fg:#111; --muted:#666; --bg:#fff; --card:#f6f6f6; --line:#e5e5e5; }
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 24px; color: var(--fg); background: var(--bg); }
-    h1 { font-size: 20px; margin: 0 0 12px; }
-    .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; }
-    label { display: grid; gap: 6px; font-size: 13px; color: var(--muted); }
-    input, button { font-size: 14px; padding: 10px 12px; border-radius: 10px; border: 1px solid #ddd; background: #fff; }
-    button { cursor: pointer; border: 1px solid #ccc; background:#111; color:#fff; }
-    button.secondary { background:#fff; color:#111; }
-    .card { background: var(--card); padding: 14px; border-radius: 14px; margin: 14px 0; }
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; white-space: pre-wrap; }
-    .small { font-size: 13px; color: var(--muted); }
-    .err { color: #b00020; white-space: pre-wrap; }
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Boston Irish Dippers Tide Height (NOAA predictions)</title>
 
-    .plotWrap{
-      position: relative;
-      width: 100%;
-      height: 420px;
-      border-radius: 12px;
-      overflow: hidden;
-      background: #fff;
-      border: 1px solid var(--line);
-    }
-    #plot{ width:100%; height:100%; }
+<link rel="icon" type="image/png" href="seahorse.png">
+<link rel="apple-touch-icon" href="seahorse.png">
 
-    #overlay{
-      position:absolute;
-      inset:0;
-      z-index: 10;
-      background: rgba(0,0,0,0);
-      touch-action: none;
-      user-select: none;
-      -webkit-user-select: none;
-      -webkit-tap-highlight-color: rgba(0,0,0,0);
-      cursor: crosshair;
-    }
+<script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
 
-    #hoverBox{
-      position: fixed;
-      z-index: 9999;
-      min-width: 210px;
-      max-width: 300px;
-      padding: 9px 11px;
-      border-radius: 12px;
-      background: rgba(255,255,255,0.97);
-      border: 1px solid rgba(0,0,0,0.18);
-      box-shadow: 0 8px 22px rgba(0,0,0,0.14);
-      pointer-events: none;
-      display: none;
-      font-size: 13px;
-      line-height: 1.25;
-    }
-    #hoverBox .t { font-weight: 700; }
-    #hoverBox .m { color: var(--muted); }
-    #hoverBox .sep { height: 6px; }
-    #hoverBox .tiny { font-size: 12px; color: var(--muted); }
+<style>
+body { font-family: system-ui,-apple-system,Segoe UI,Roboto,sans-serif; margin: 20px; background:#fff; color:#111; }
+.header { display:flex; align-items:center; gap:14px; margin-bottom:12px; }
+.header img { height:52px; }
+h1 { font-size:20px; margin:0; }
 
-    .tableWrap {
-      overflow: auto;
-      background:#fff;
-      border:1px solid var(--line);
-      border-radius: 12px;
-      max-height: 360px;
-    }
-    table { border-collapse: collapse; width: 100%; min-width: 640px; }
-    th, td { border-bottom: 1px solid var(--line); padding: 10px 12px; text-align: left; font-size: 14px; }
-    th { position: sticky; top: 0; background: #fff; z-index: 1; }
-    td.monoCell { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
-    .pill { display:inline-block; padding: 2px 8px; border-radius: 999px; background:#eee; font-size:12px; color:#333; }
-  </style>
+.card { background:#f6f6f6; padding:14px; border-radius:14px; margin-bottom:14px; }
+.row { display:flex; gap:12px; flex-wrap:wrap; align-items:end; }
+label { display:grid; gap:6px; font-size:13px; color:#666; }
+input,button { font-size:14px; padding:10px 12px; border-radius:10px; border:1px solid #ddd; }
+button { background:#111; color:#fff; cursor:pointer; }
+
+.pill { display:inline-block; padding:3px 10px; border-radius:999px; background:#eee; font-size:12px; }
+
+.plotWrap{ position:relative; height:420px; background:#fff; border-radius:12px; overflow:hidden; border:1px solid #ddd;}
+#plot{ width:100%; height:100%; }
+#overlay{ position:absolute; inset:0; z-index:10; touch-action:none; }
+
+#hoverBox{
+ position:fixed; z-index:9999; background:white;
+ padding:10px 12px; border-radius:12px;
+ box-shadow:0 6px 20px rgba(0,0,0,.15);
+ border:1px solid rgba(0,0,0,.15);
+ font-size:13px; pointer-events:none; display:none;
+}
+
+.tableWrap { max-height:350px; overflow:auto; background:#fff; border-radius:12px; border:1px solid #ddd;}
+table { border-collapse:collapse; width:100%; min-width:680px;}
+th,td{ padding:10px 12px; border-bottom:1px solid #eee; font-size:14px;}
+th{ background:#fff; position:sticky; top:0;}
+
+.kv{ display:grid; gap:8px; background:#fff; padding:10px 12px; border-radius:12px; border:1px solid #ddd; margin-top:10px;}
+.kv .line{ display:flex; gap:10px; flex-wrap:wrap; }
+</style>
 </head>
+
 <body>
+
+<div class="header">
+  <img src="seahorse.png">
   <h1>Boston Irish Dippers Tide Height (NOAA predictions)</h1>
+</div>
 
-  <div class="card">
-    <div class="row">
-      <label>
-        Date (Boston)
-        <input id="date" type="date" />
-      </label>
-      <button id="jump" class="secondary" type="button">Jump to table ↓</button>
-    </div>
-
-    <div id="status" class="small" style="margin-top:10px;"></div>
-    <div id="summary" class="mono" style="margin-top:10px;"></div>
-    <div id="error" class="err" style="margin-top:10px;"></div>
-
-    <div class="small" style="margin-top:10px;">
-      Station: <span class="mono">8443970</span> (Boston, MA). Datum: <span class="mono">MLLW</span>.
-      Drag on the plot to scrub time & value (zoom/selection disabled).
-    </div>
+<div class="card">
+  <div class="row">
+    <label>Date (Boston)
+      <input id="date" type="date">
+    </label>
   </div>
 
-  <div class="card">
-    <div class="plotWrap">
-      <div id="plot"></div>
-      <div id="overlay" aria-label="Scrub overlay"></div>
-    </div>
+  <div class="kv">
+    <div class="line"><b>Conditions:</b> <span id="condLine" class="pill">loading…</span></div>
+    <div class="line"><b>Forecast:</b> <span id="wxLine" class="pill">loading…</span></div>
+    <div class="line"><b>Selected:</b> <span id="selectedLine" class="pill">drag curve</span></div>
   </div>
+</div>
 
-  <div id="hoverBox"></div>
-
-  <div class="card" id="tableSection">
-    <div class="row" style="justify-content: space-between;">
-      <div>
-        <div style="font-size:16px; font-weight:700;">15-minute table (05:00 → 22:00)</div>
-        <div class="small" id="tableStatus">Table not generated yet.</div>
-      </div>
-      <div class="small"><span class="pill" id="tableCount">0 rows</span></div>
-    </div>
-
-    <div style="height:10px;"></div>
-    <div class="tableWrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Time</th>
-            <th>Height (ft)</th>
-            <th>Height (m)</th>
-            <th>% of day max (High tide)</th>
-          </tr>
-        </thead>
-        <tbody id="tideTableBody"></tbody>
-      </table>
-    </div>
+<div class="card">
+  <div class="plotWrap">
+    <div id="plot"></div>
+    <div id="overlay"></div>
   </div>
+</div>
 
-  <script>
-    // ---------- Config ----------
-    const STATION = "8443970";
-    const NOAA = "https://api.tidesandcurrents.noaa.gov/api/prod/datagetter";
-    const DATUM = "MLLW";
-    const CURVE_INTERVAL_MIN = 6;
+<div id="hoverBox"></div>
 
-    const TABLE_START_H = 5;
-    const TABLE_END_H   = 22;
-    const TABLE_STEP_MIN = 15;
+<div class="card">
+  <h3>15-minute tide table (05:00 → 22:00)</h3>
+  <div class="tableWrap">
+    <table>
+      <thead>
+        <tr><th>Time</th><th>ft</th><th>m</th><th>% of max</th></tr>
+      </thead>
+      <tbody id="tideTableBody"></tbody>
+    </table>
+  </div>
+</div>
 
-    // State (feet)
-    let CURVE = [];
-    let HILO = [];
-    let YMIN = 0, YMAX = 1;
-    let DAY_MAX_HIGH_FT = null;
-    let DAY_MAX_HIGH_TIME = null;
+<script>
+const STATION="8443970", NOAA="https://api.tidesandcurrents.noaa.gov/api/prod/datagetter";
+const NWS_LAT=42.3601, NWS_LON=-71.0589;
 
-    // ---------- Helpers ----------
-    const pad2 = (n) => String(n).padStart(2, "0");
-    function todayISO() {
-      const d = new Date();
-      return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
+const pad=n=>String(n).padStart(2,"0");
+const today=()=>{const d=new Date();return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;}
+const ftToM=f=>f*0.3048, fToC=f=>(f-32)*5/9;
+
+async function fetchJSON(u){const r=await fetch(u);return await r.json();}
+
+let CURVE=[], HILO=[], MAX=null;
+
+async function loadDay(date){
+  document.getElementById("date").value=date;
+  const ymd=date.replace(/-/g,"");
+  const base=`${NOAA}?application=boston-dippers&station=${STATION}&datum=MLLW&time_zone=lst_ldt&units=english&format=json`;
+
+  CURVE=(await fetchJSON(`${base}&product=predictions&interval=6&begin_date=${ymd}&end_date=${ymd}`)).predictions
+    .map(p=>({t:new Date(p.t),v:+p.v}));
+
+  HILO=(await fetchJSON(`${base}&product=predictions&interval=hilo&begin_date=${ymd}&end_date=${ymd}`)).predictions
+    .map(p=>({t:new Date(p.t),v:+p.v,type:p.type}));
+
+  MAX=Math.max(...HILO.filter(x=>x.type==="H").map(x=>x.v));
+
+  drawPlot();
+  buildTable();
+}
+
+function tideAt(t){
+  for(let i=0;i<CURVE.length-1;i++){
+    let a=CURVE[i], b=CURVE[i+1];
+    if(t>=a.t && t<=b.t){
+      let w=(t-a.t)/(b.t-a.t);
+      return a.v+w*(b.v-a.v);
     }
-    function ymdCompact(isoDate) { return isoDate.replaceAll("-", ""); }
+  }
+  return CURVE[0].v;
+}
 
-    function parseNOAATimeLocal(tStr) {
-      const [d, hm] = tStr.split(" ");
-      const [Y, M, D] = d.split("-").map(Number);
-      const [h, m] = hm.split(":").map(Number);
-      return new Date(Y, M - 1, D, h, m, 0, 0);
+function drawPlot(){
+  const xs=CURVE.map(p=>p.t), ys=CURVE.map(p=>p.v);
+  const start=new Date(xs[0].setHours(10,0,0,0));
+  Plotly.newPlot("plot",[
+    {x:xs,y:ys,mode:"lines"},
+    {x:[start],y:[tideAt(start)],mode:"markers"}
+  ],{
+    dragmode:false,hovermode:false,
+    shapes:[{type:"line",x0:start,x1:start,y0:0,y1:Math.max(...ys),line:{dash:"dot"}}]
+  },{displayModeBar:false,staticPlot:true});
+
+  installScrub();
+}
+
+function installScrub(){
+  const overlay=document.getElementById("overlay"), box=document.getElementById("hoverBox");
+  overlay.onpointermove=e=>{
+    const r=overlay.getBoundingClientRect();
+    const px=e.clientX-r.left;
+    const frac=px/r.width;
+    const t=new Date(CURVE[0].t.getTime()+frac*(CURVE.at(-1).t-CURVE[0].t));
+    const v=tideAt(t);
+
+    Plotly.relayout("plot",{"shapes[0].x0":t,"shapes[0].x1":t});
+    Plotly.restyle("plot",{x:[[t]],y:[[v]]},[1]);
+
+    box.style.display="block";
+    box.style.left=`${e.clientX+15}px`;
+    box.style.top=`${Math.max(8,e.clientY-80)}px`;
+    box.innerHTML=`<b>${t.toLocaleTimeString()}</b><br>${v.toFixed(2)} ft (${ftToM(v).toFixed(2)} m)<br>${(100*v/MAX).toFixed(0)}% of max`;
+    document.getElementById("selectedLine").textContent=box.textContent;
+  }
+}
+
+function buildTable(){
+  let tb=document.getElementById("tideTableBody");
+  tb.innerHTML="";
+  const d=CURVE[0].t;
+  for(let h=5;h<=22;h++){
+    for(let m=0;m<60;m+=15){
+      const t=new Date(d.getFullYear(),d.getMonth(),d.getDate(),h,m);
+      const v=tideAt(t);
+      tb.innerHTML+=`<tr><td>${pad(h)}:${pad(m)}</td><td>${v.toFixed(2)}</td><td>${ftToM(v).toFixed(2)}</td><td>${(100*v/MAX).toFixed(0)}%</td></tr>`;
     }
+  }
+}
+
+async function updateWeather(){
+  const p=await fetchJSON(`https://api.weather.gov/points/${NWS_LAT},${NWS_LON}`);
+  const h=await fetchJSON(p.properties.forecastHourly);
+  const n=h.properties.periods[0];
+  document.getElementById("wxLine").textContent=
+    `${n.shortForecast} | ${n.temperature}°F | Wind ${n.windSpeed}`;
+}
+
+document.getElementById("date").onchange=e=>loadDay(e.target.value);
+loadDay(today());
+updateWeather();
+</script>
 
-    function fmtLocal(dt) {
-      const Y = dt.getFullYear();
-      const M = pad2(dt.getMonth()+1);
-      const D = pad2(dt.getDate());
-      const h = pad2(dt.getHours());
-      const m = pad2(dt.getMinutes());
-      return `${Y}-${M}-${D} ${h}:${m}`;
-    }
-
-    function ftToM(ft) { return ft * 0.3048; }
-
-    function linearInterpolate(t0, v0, t1, v1, t) {
-      const x0 = t0.getTime(), x1 = t1.getTime(), x = t.getTime();
-      if (x1 === x0) return v0;
-      const w = (x - x0) / (x1 - x0);
-      return v0 + w * (v1 - v0);
-    }
-
-    async function fetchNOAA(params) {
-      const url = new URL(NOAA);
-      Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
-      const resp = await fetch(url.toString());
-      if (!resp.ok) throw new Error(`NOAA HTTP ${resp.status}`);
-      const data = await resp.json();
-      if (data.error) throw new Error(`NOAA error: ${data.error?.message || JSON.stringify(data.error)}`);
-      return data;
-    }
-
-    async function fetchDayCurveFeet(isoDate) {
-      const ymd = ymdCompact(isoDate);
-      const data = await fetchNOAA({
-        product: "predictions",
-        application: "boston-tides-ghpages",
-        station: STATION,
-        begin_date: `${ymd} 00:00`,
-        end_date: `${ymd} 23:59`,
-        datum: DATUM,
-        time_zone: "lst_ldt",
-        units: "english",
-        interval: String(CURVE_INTERVAL_MIN),
-        format: "json"
-      });
-      if (!data.predictions) throw new Error("No predictions returned (curve).");
-      return data.predictions
-        .map(p => ({ tStr: p.t, t: parseNOAATimeLocal(p.t), vFt: Number(p.v) }))
-        .sort((a,b) => a.t - b.t);
-    }
-
-    async function fetchDayHiLoFeet(isoDate) {
-      const ymd = ymdCompact(isoDate);
-      const data = await fetchNOAA({
-        product: "predictions",
-        application: "boston-tides-ghpages",
-        station: STATION,
-        begin_date: `${ymd} 00:00`,
-        end_date: `${ymd} 23:59`,
-        datum: DATUM,
-        time_zone: "lst_ldt",
-        units: "english",
-        interval: "hilo",
-        format: "json"
-      });
-      if (!data.predictions) throw new Error("No predictions returned (hilo).");
-      return data.predictions
-        .map(p => ({ tStr: p.t, t: parseNOAATimeLocal(p.t), vFt: Number(p.v), type: p.type }))
-        .sort((a,b) => a.t - b.t);
-    }
-
-    function tideAtTimeFt(target) {
-      const pts = CURVE;
-      if (!pts.length) return null;
-
-      if (target <= pts[0].t) return pts[0].vFt;
-      if (target >= pts[pts.length - 1].t) return pts[pts.length - 1].vFt;
-
-      let lo = 0, hi = pts.length - 1;
-      while (lo + 1 < hi) {
-        const mid = (lo + hi) >> 1;
-        if (pts[mid].t <= target) lo = mid; else hi = mid;
-      }
-      const p0 = pts[lo], p1 = pts[hi];
-      return linearInterpolate(p0.t, p0.vFt, p1.t, p1.vFt, target);
-    }
-
-    function computeDayMaxHigh() {
-      const highs = HILO.filter(x => x.type === "H");
-      if (!highs.length) {
-        DAY_MAX_HIGH_FT = null;
-        DAY_MAX_HIGH_TIME = null;
-        return;
-      }
-      let best = highs[0];
-      for (const h of highs) if (h.vFt > best.vFt) best = h;
-      DAY_MAX_HIGH_FT = best.vFt;
-      DAY_MAX_HIGH_TIME = best.t;
-    }
-
-    function setStatus(msg) { document.getElementById("status").textContent = msg; }
-    function setError(msg) { document.getElementById("error").textContent = msg; }
-
-    // ---------- Plot ----------
-    function renderPlot(defaultCursorTime) {
-      const plotDiv = document.getElementById("plot");
-
-      const xs = CURVE.map(p => p.t);
-      const ys = CURVE.map(p => p.vFt);
-      YMIN = Math.min(...ys);
-      YMAX = Math.max(...ys);
-
-      const cursorY = tideAtTimeFt(defaultCursorTime);
-
-      const highs = HILO.filter(x=>x.type==="H");
-      const lows  = HILO.filter(x=>x.type==="L");
-
-      const traces = [
-        { x: xs, y: ys, mode: "lines", name: "Tide" },
-        { x: highs.map(x=>x.t), y: highs.map(x=>x.vFt), mode:"markers", name:"High", marker:{size:8, symbol:"triangle-up"} },
-        { x: lows.map(x=>x.t),  y: lows.map(x=>x.vFt),  mode:"markers", name:"Low",  marker:{size:8, symbol:"triangle-down"} },
-        { x: [defaultCursorTime], y: [cursorY], mode:"markers", name:"Selected", marker:{size:11, symbol:"circle"} }
-      ];
-
-      const layout = {
-        margin: { l: 60, r: 20, t: 10, b: 60 },
-        xaxis: { title: "Local time (Boston)", type: "date", fixedrange: true },
-        yaxis: { title: "Height (ft)", fixedrange: true },
-        legend: { orientation: "h", y: -0.25 },
-        hovermode: false,
-        dragmode: false,
-        shapes: [{
-          type: "line",
-          x0: defaultCursorTime, x1: defaultCursorTime,
-          y0: YMIN, y1: YMAX,
-          xref: "x", yref: "y",
-          line: { width: 2, dash: "dot" }
-        }]
-      };
-
-      Plotly.newPlot(plotDiv, traces, layout, {
-        responsive: true,
-        displayModeBar: false,
-        displaylogo: false,
-        staticPlot: true
-      });
-
-      const summary = [];
-      if (DAY_MAX_HIGH_FT != null) {
-        summary.push(`Day max HIGH tide: ${DAY_MAX_HIGH_FT.toFixed(2)} ft | ${ftToM(DAY_MAX_HIGH_FT).toFixed(2)} m`);
-        summary.push(`(Highest High event @ ${fmtLocal(DAY_MAX_HIGH_TIME)})`);
-      } else {
-        summary.push(`Day max HIGH tide: unavailable`);
-      }
-      document.getElementById("summary").textContent = summary.join("\n");
-
-      installScrub();
-    }
-
-    // ---------- Tooltip + scrub ----------
-    function installScrub() {
-      const overlay = document.getElementById("overlay");
-      const plotDiv = document.getElementById("plot");
-      const hoverBox = document.getElementById("hoverBox");
-
-      let lastX = null, lastY = null, rafPending = false;
-
-      function placeHoverBoxAlwaysAbove(clientX, clientY) {
-        const padX = 16;
-        const padY = 64; // large vertical offset so it doesn't sit under finger
-
-        // Always try ABOVE the finger
-        let left = clientX + padX;
-        let top  = clientY - padY;
-
-        const rect = hoverBox.getBoundingClientRect();
-
-        // If it goes off right edge, flip to left
-        if (left + rect.width + 8 > window.innerWidth) left = clientX - rect.width - padX;
-        if (left < 8) left = 8;
-
-        // If above top edge, put it above chart but still visible (cap at 8)
-        if (top < 8) top = 8;
-
-        // If still collides with finger near top, we keep it at top=8 (always visible)
-        hoverBox.style.left = `${left}px`;
-        hoverBox.style.top  = `${top}px`;
-      }
-
-      function showBox(clientX, clientY, dt, vFt) {
-        const vM = ftToM(vFt);
-
-        let pctLine = "";
-        let maxLine = "";
-        if (DAY_MAX_HIGH_FT && DAY_MAX_HIGH_FT > 0) {
-          const pct = Math.max(0, Math.min(100, 100 * vFt / DAY_MAX_HIGH_FT));
-          pctLine = ` • ${pct.toFixed(0)}% of day max`;
-          maxLine = `Day max high: ${DAY_MAX_HIGH_FT.toFixed(2)} ft | ${ftToM(DAY_MAX_HIGH_FT).toFixed(2)} m`;
-        }
-
-        hoverBox.innerHTML =
-          `<div class="t">${fmtLocal(dt)}</div>` +
-          `<div>${vFt.toFixed(2)} ft<span class="m">${pctLine}</span></div>` +
-          `<div class="m">${vM.toFixed(2)} m</div>` +
-          `<div class="sep"></div>` +
-          `<div class="tiny">${maxLine}</div>`;
-
-        hoverBox.style.display = "block";
-        placeHoverBoxAlwaysAbove(clientX, clientY);
-      }
-
-      function doScrub(clientX, clientY) {
-        if (!CURVE.length || !plotDiv._fullLayout) return;
-
-        const rect = overlay.getBoundingClientRect();
-        const xpx = clientX - rect.left;
-
-        const xaxis = plotDiv._fullLayout.xaxis;
-        const xDate = new Date(xaxis.p2d(xpx));
-
-        const minT = CURVE[0].t;
-        const maxT = CURVE[CURVE.length - 1].t;
-        const clamped = new Date(Math.min(maxT.getTime(), Math.max(minT.getTime(), xDate.getTime())));
-
-        const vFt = tideAtTimeFt(clamped);
-
-        Plotly.relayout(plotDiv, {
-          "shapes[0].x0": clamped,
-          "shapes[0].x1": clamped
-        });
-        Plotly.restyle(plotDiv, { x: [[clamped]], y: [[vFt]] }, [3]);
-
-        showBox(clientX, clientY, clamped, vFt);
-      }
-
-      function schedule(clientX, clientY) {
-        lastX = clientX; lastY = clientY;
-        if (rafPending) return;
-        rafPending = true;
-        requestAnimationFrame(() => {
-          rafPending = false;
-          doScrub(lastX, lastY);
-        });
-      }
-
-      // Pointer events
-      overlay.addEventListener("pointerdown", (e) => {
-        e.preventDefault();
-        overlay.setPointerCapture?.(e.pointerId);
-        schedule(e.clientX, e.clientY);
-      }, { passive:false });
-
-      overlay.addEventListener("pointermove", (e) => {
-        e.preventDefault();
-        schedule(e.clientX, e.clientY);
-      }, { passive:false });
-
-      // On desktop, hide when leaving plot area; on touch, we keep last position (do nothing on touchend)
-      overlay.addEventListener("mouseleave", () => {
-        // Hide only for mouse users (hover behavior)
-        if (navigator.maxTouchPoints === 0) hoverBox.style.display = "none";
-      });
-
-      // iOS fallback touch events
-      overlay.addEventListener("touchstart", (e) => {
-        e.preventDefault();
-        const t = e.touches[0];
-        schedule(t.clientX, t.clientY);
-      }, { passive:false });
-
-      overlay.addEventListener("touchmove", (e) => {
-        e.preventDefault();
-        const t = e.touches[0];
-        schedule(t.clientX, t.clientY);
-      }, { passive:false });
-
-      // touchend: intentionally keep tooltip visible at last position
-      overlay.addEventListener("touchend", (e) => {
-        // no-op (keeps last tooltip)
-      }, { passive:false });
-    }
-
-    // ---------- Table ----------
-    function buildTable(isoDate) {
-      const tbody = document.getElementById("tideTableBody");
-      const status = document.getElementById("tableStatus");
-      const count = document.getElementById("tableCount");
-
-      tbody.innerHTML = "";
-      status.textContent = "Generating table…";
-      count.textContent = "0 rows";
-
-      const [Y, M, D] = isoDate.split("-").map(Number);
-      const start = new Date(Y, M - 1, D, TABLE_START_H, 0, 0, 0);
-      const end   = new Date(Y, M - 1, D, TABLE_END_H, 0, 0, 0);
-
-      const frag = document.createDocumentFragment();
-      let n = 0;
-
-      for (let t = new Date(start); t <= end; t = new Date(t.getTime() + TABLE_STEP_MIN * 60000)) {
-        const vFt = tideAtTimeFt(t);
-        const vM = ftToM(vFt);
-
-        let pctText = "—";
-        if (DAY_MAX_HIGH_FT && DAY_MAX_HIGH_FT > 0) {
-          const pct = Math.max(0, Math.min(100, 100 * vFt / DAY_MAX_HIGH_FT));
-          pctText = `${pct.toFixed(0)}%`;
-        }
-
-        const tr = document.createElement("tr");
-
-        const tdTime = document.createElement("td");
-        tdTime.className = "monoCell";
-        tdTime.textContent = `${pad2(t.getHours())}:${pad2(t.getMinutes())}`;
-
-        const tdFt = document.createElement("td");
-        tdFt.className = "monoCell";
-        tdFt.textContent = vFt.toFixed(2);
-
-        const tdM = document.createElement("td");
-        tdM.className = "monoCell";
-        tdM.textContent = vM.toFixed(2);
-
-        const tdPct = document.createElement("td");
-        tdPct.className = "monoCell";
-        tdPct.textContent = pctText;
-
-        tr.appendChild(tdTime);
-        tr.appendChild(tdFt);
-        tr.appendChild(tdM);
-        tr.appendChild(tdPct);
-
-        frag.appendChild(tr);
-        n++;
-      }
-
-      tbody.appendChild(frag);
-      status.textContent = "Table generated.";
-      count.textContent = `${n} rows`;
-    }
-
-    // ---------- Main ----------
-    const dateEl = document.getElementById("date");
-    const jump = document.getElementById("jump");
-
-    jump.addEventListener("click", () => {
-      document.getElementById("tableSection").scrollIntoView({ behavior: "smooth", block: "start" });
-    });
-
-    async function loadDate(isoDate) {
-      setError("");
-      setStatus("Fetching NOAA predictions…");
-      document.getElementById("summary").textContent = "";
-
-      try {
-        const cacheKey = `bostontides_${isoDate}_feet_mllw_curve+hilo`;
-        const cached = sessionStorage.getItem(cacheKey);
-        if (cached) {
-          const obj = JSON.parse(cached);
-          CURVE = obj.curve.map(p => ({ ...p, t: new Date(p.t) }));
-          HILO  = obj.hilo.map(p => ({ ...p, t: new Date(p.t) }));
-        } else {
-          const [curve, hilo] = await Promise.all([
-            fetchDayCurveFeet(isoDate),
-            fetchDayHiLoFeet(isoDate)
-          ]);
-          CURVE = curve;
-          HILO = hilo;
-          sessionStorage.setItem(cacheKey, JSON.stringify({ curve: CURVE, hilo: HILO }));
-        }
-
-        computeDayMaxHigh();
-
-        // default cursor time = 10:00
-        const [Y, M, D] = isoDate.split("-").map(Number);
-        const cursor = new Date(Y, M - 1, D, 10, 0, 0, 0);
-
-        renderPlot(cursor);
-        buildTable(isoDate);
-
-        setStatus("Done.");
-      } catch (e) {
-        setStatus("");
-        setError(String(e?.message || e));
-      }
-    }
-
-    // Init
-    dateEl.value = todayISO();
-    dateEl.addEventListener("change", () => loadDate(dateEl.value));
-    loadDate(dateEl.value);
-  </script>
 </body>
 </html>
