@@ -18,8 +18,6 @@
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
     .small { font-size: 13px; color: var(--muted); }
     #plot { width: 100%; height: 420px; }
-    .grid2 { display: grid; grid-template-columns: 1fr; gap: 10px; }
-    @media (min-width: 900px) { .grid2 { grid-template-columns: 1fr 1fr; } }
     .err { color: #b00020; white-space: pre-wrap; }
   </style>
 </head>
@@ -63,6 +61,8 @@
     <div id="plot"></div>
     <div class="small" style="margin-top:10px;">
       Station: <span class="mono">8443970</span> (Boston, MA). Time zone: <span class="mono">lst_ldt</span> (local time with DST).
+      <br/>
+      Tip: on mobile, tap the curve to show the value.
     </div>
   </div>
 
@@ -76,24 +76,17 @@
     const pad2 = (n) => String(n).padStart(2, "0");
 
     function todayISO() {
-      // User is in America/New_York; Boston shares the same offset rules.
       const d = new Date();
       return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
     }
 
-    function nowHHMM() {
-      const d = new Date();
-      return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
-    }
-
     function ymdCompact(isoDate) {
-      // "YYYY-MM-DD" -> "YYYYMMDD"
       return isoDate.replaceAll("-", "");
     }
 
     function parseNOAATimeLocal(tStr) {
       // NOAA returns "YYYY-MM-DD HH:MM" (no timezone tag, but it's in lst_ldt we requested).
-      // We parse as local time (user local) which matches Boston local.
+      // Parse as local time; Boston matches user's local offset if you're in ET.
       const [d, hm] = tStr.split(" ");
       const [Y, M, D] = d.split("-").map(Number);
       const [h, m] = hm.split(":").map(Number);
@@ -107,7 +100,6 @@
     }
 
     function fmtLocal(dt) {
-      // readable local timestamp
       const Y = dt.getFullYear();
       const M = pad2(dt.getMonth()+1);
       const D = pad2(dt.getDate());
@@ -129,7 +121,6 @@
       const resp = await fetch(url.toString());
       if (!resp.ok) throw new Error(`NOAA HTTP ${resp.status}`);
       const data = await resp.json();
-      // If NOAA returns an error, it often includes an "error" field.
       if (data.error) throw new Error(`NOAA error: ${data.error?.message || JSON.stringify(data.error)}`);
       return data;
     }
@@ -149,13 +140,9 @@
         format: "json"
       });
       if (!data.predictions) throw new Error("No predictions returned.");
-      const pts = data.predictions.map(p => ({
-        tStr: p.t,
-        t: parseNOAATimeLocal(p.t),
-        v: Number(p.v)
-      })).sort((a,b) => a.t - b.t);
-
-      return pts;
+      return data.predictions
+        .map(p => ({ tStr: p.t, t: parseNOAATimeLocal(p.t), v: Number(p.v) }))
+        .sort((a,b) => a.t - b.t);
     }
 
     async function fetchDayHiLo({ isoDate, datum, units }) {
@@ -172,25 +159,18 @@
         interval: "hilo",
         format: "json"
       });
-      const hilo = (data.predictions || []).map(p => ({
-        tStr: p.t,
-        t: parseNOAATimeLocal(p.t),
-        v: Number(p.v),
-        type: p.type // "H" or "L"
-      })).sort((a,b) => a.t - b.t);
-
-      return hilo;
+      return (data.predictions || [])
+        .map(p => ({ tStr: p.t, t: parseNOAATimeLocal(p.t), v: Number(p.v), type: p.type })) // H/L
+        .sort((a,b) => a.t - b.t);
     }
 
     function tideAtTime(pts, target) {
-      // Finds nearest bracketing points and interpolates; also returns nearest point.
       if (!pts.length) throw new Error("Empty predictions array.");
 
-      // If target out of range, clamp to endpoints
-      if (target <= pts[0].t) return { method: "clamped", t: target, v: pts[0].v, nearest: pts[0] };
-      if (target >= pts[pts.length - 1].t) return { method: "clamped", t: target, v: pts[pts.length - 1].v, nearest: pts[pts.length - 1] };
+      if (target <= pts[0].t) return { method: "clamped", t: target, v: pts[0].v, nearest: pts[0], trend: null };
+      if (target >= pts[pts.length - 1].t) return { method: "clamped", t: target, v: pts[pts.length - 1].v, nearest: pts[pts.length - 1], trend: null };
 
-      // Binary search for right index
+      // binary search for bracketing points
       let lo = 0, hi = pts.length - 1;
       while (lo + 1 < hi) {
         const mid = (lo + hi) >> 1;
@@ -200,10 +180,7 @@
       const p0 = pts[lo], p1 = pts[hi];
       const v = linearInterpolate(p0.t, p0.v, p1.t, p1.v, target);
 
-      // nearest point (for display)
       const nearest = (Math.abs(p0.t - target) <= Math.abs(p1.t - target)) ? p0 : p1;
-
-      // rising/falling estimate (local slope)
       const trend = (p1.v > p0.v) ? "rising" : (p1.v < p0.v ? "falling" : "flat");
 
       return { method: "interpolated", t: target, v, nearest, bracket: [p0, p1], trend };
@@ -275,10 +252,10 @@
       ];
 
       const layout = {
-        margin: { l: 60, r: 20, t: 20, b: 50 },
+        margin: { l: 60, r: 20, t: 20, b: 60 },
         xaxis: { title: "Local time (Boston)", type: "date" },
         yaxis: { title: `Height (${unitLabel(units)})` },
-        legend: { orientation: "h", y: -0.2 },
+        legend: { orientation: "h", y: -0.25 },
         hovermode: "x unified",
         shapes: [
           // vertical line at selected time
@@ -292,7 +269,43 @@
         ]
       };
 
-      Plotly.newPlot("plot", traces, layout, { responsive: true, displaylogo: false });
+      Plotly.newPlot("plot", traces, layout, {
+        responsive: true,
+        displaylogo: false,
+        scrollZoom: false,   // disables scroll-to-zoom (mobile friendly)
+        doubleClick: "reset", // double-tap resets
+        showTips: false
+      });
+
+      // Tap/click shows value + moves vertical cursor line.
+      const plotDiv = document.getElementById("plot");
+
+      if (typeof plotDiv.removeAllListeners === "function") {
+        plotDiv.removeAllListeners("plotly_click");
+      }
+
+      plotDiv.on("plotly_click", (ev) => {
+        if (!ev.points || !ev.points.length) return;
+
+        const pt = ev.points.find(p => p.data && p.data.name === "Tide (predicted)") || ev.points[0];
+
+        const dt = new Date(pt.x);
+        const y = Number(pt.y);
+        const u = unitLabel(units);
+
+        const tappedText =
+          `Tapped: ${fmtLocal(dt)}\n` +
+          `Tide height: ${y.toFixed(2)} ${u}`;
+
+        const resEl = document.getElementById("result");
+        const base = (resEl.textContent || "").split("\n\nTapped:")[0];
+        resEl.textContent = (base ? base + "\n\n" : "") + tappedText;
+
+        Plotly.relayout(plotDiv, {
+          "shapes[0].x0": dt,
+          "shapes[0].x1": dt
+        });
+      });
     }
 
     // ---------- Main ----------
@@ -301,7 +314,7 @@
     const btn = document.getElementById("btn");
 
     dateEl.value = todayISO();
-    timeEl.value = nowHHMM();
+    timeEl.value = "10:00"; // default time = 10 AM
 
     btn.addEventListener("click", async () => {
       clearUI();
@@ -319,7 +332,6 @@
         const target = toUserDateTime(isoDate, hhmm);
         setStatus("Fetching NOAA predictions…");
 
-        // One call for curve + one for high/low markers (still tiny)
         const [pts, hilo] = await Promise.all([
           fetchDayCurve({ isoDate, datum, units }),
           fetchDayHiLo({ isoDate, datum, units })
@@ -329,18 +341,16 @@
         const { prev, next } = findNextHiLo(hilo, target);
 
         const u = unitLabel(units);
-        const val = at.v;
-
         const lines = [];
         lines.push(`Selected: ${fmtLocal(target)}`);
-        lines.push(`Tide height: ${val.toFixed(2)} ${u} (${at.method}${at.trend ? `, ${at.trend}` : ""})`);
+        lines.push(`Tide height: ${at.v.toFixed(2)} ${u} (${at.method}${at.trend ? `, ${at.trend}` : ""})`);
         if (at.nearest) lines.push(`Nearest NOAA point: ${at.nearest.tStr} → ${at.nearest.v.toFixed(2)} ${u}`);
         if (prev) lines.push(`Previous: ${prev.type === "H" ? "High" : "Low"} @ ${prev.tStr} → ${prev.v.toFixed(2)} ${u}`);
         if (next) lines.push(`Next: ${next.type === "H" ? "High" : "Low"} @ ${next.tStr} → ${next.v.toFixed(2)} ${u}`);
 
         document.getElementById("result").textContent = lines.join("\n");
 
-        plotDay({ pts, hilo, target, targetVal: val, units });
+        plotDay({ pts, hilo, target, targetVal: at.v, units });
 
         setStatus("Done.");
       } catch (e) {
@@ -351,7 +361,7 @@
       }
     });
 
-    // Optional: auto-run once on load
+    // Auto-run once on load
     btn.click();
   </script>
 </body>
