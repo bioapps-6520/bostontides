@@ -109,12 +109,16 @@
 
     <div class="kv">
       <div class="line">
-        <span class="k">Conditions (NOAA buoy 44013 latest):</span>
+        <span class="k">Conditions (buoy 44013 latest):</span>
         <span class="pill" id="condLine">—</span>
       </div>
       <div class="line">
-        <span class="k">Forecast (NWS next 12h):</span>
+        <span class="k">Forecast (NWS):</span>
         <span class="pill" id="wxLine">—</span>
+      </div>
+      <div class="line">
+        <span class="k">Tide events:</span>
+        <span class="pill" id="tideEventsLine">—</span>
       </div>
       <div class="line">
         <span class="k">Selected:</span>
@@ -179,7 +183,7 @@ const ERDDAP_BASE = "https://data.neracoos.org/erddap/tabledap/NDBC_44013.json";
 const ERDDAP_LATEST =
   `${ERDDAP_BASE}?time,WTMP,ATMP,WSPD,WDIR&orderByMax(%22time%22)`;
 
-// NWS point (Boston) for forecast (shown only for today)
+// NWS (Boston)
 const NWS_LAT = 42.3601;
 const NWS_LON = -71.0589;
 
@@ -196,8 +200,10 @@ function todayISO() {
   return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
 }
 function ymdCompact(isoDate){ return isoDate.replaceAll("-", ""); }
+
 function ftToM(ft){ return ft * 0.3048; }
 function cToF(c){ return (c * 9/5) + 32; }
+function fToC(f){ return (f - 32) * 5/9; }
 function msToMph(ms){ return ms * 2.236936; }
 
 function fmtHM(dt){
@@ -216,6 +222,31 @@ function degToCardinal(deg){
   const dirs = ["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW"];
   const ix = Math.round(deg / 22.5) % 16;
   return dirs[ix];
+}
+function sameISODate(a, iso){
+  const y = a.getFullYear(), m = pad2(a.getMonth()+1), d = pad2(a.getDate());
+  return `${y}-${m}-${d}` === iso;
+}
+function daysBetweenISO(aIso, bIso){
+  // aIso and bIso are YYYY-MM-DD; return b-a in days (bIso - aIso)
+  const [ay,am,ad] = aIso.split("-").map(Number);
+  const [by,bm,bd] = bIso.split("-").map(Number);
+  const a = Date.UTC(ay, am-1, ad);
+  const b = Date.UTC(by, bm-1, bd);
+  return Math.round((b - a) / 86400000);
+}
+function fmtTempBoth(value, unit){
+  if(value == null) return "—";
+  const x = Number(value);
+  if(Number.isNaN(x)) return "—";
+  if(unit === "F"){
+    return `${x.toFixed(0)}°F (${fToC(x).toFixed(0)}°C)`;
+  }
+  if(unit === "C"){
+    return `${cToF(x).toFixed(0)}°F (${x.toFixed(0)}°C)`;
+  }
+  // unknown
+  return `${x}`;
 }
 async function fetchJSON(url, headers){
   const r = await fetch(url, { headers, cache:"no-store" });
@@ -268,6 +299,21 @@ function tideAtTimeFt(target){
   const w=(x-x0)/(x1-x0);
   return p0.vFt + w*(p1.vFt-p0.vFt);
 }
+function updateTideEventsLine(){
+  const el = document.getElementById("tideEventsLine");
+  if(!HILO.length){
+    el.textContent = "—";
+    return;
+  }
+  const highs = HILO.filter(x => x.type === "H" || x.type === "HH")
+    .map(x => `${fmtHM(x.t)} (${x.vFt.toFixed(1)} ft)`);
+  const lows  = HILO.filter(x => x.type === "L" || x.type === "LL")
+    .map(x => `${fmtHM(x.t)} (${x.vFt.toFixed(1)} ft)`);
+
+  const highTxt = highs.length ? `High: ${highs.join(" • ")}` : "High: —";
+  const lowTxt  = lows.length  ? `Low: ${lows.join(" • ")}`  : "Low: —";
+  el.textContent = `${highTxt} | ${lowTxt}`;
+}
 
 /* ---------------- CONDITIONS (ERDDAP latest) ---------------- */
 async function updateNDBCConditions(){
@@ -293,7 +339,7 @@ async function updateNDBCConditions(){
       return (v === null || v === undefined) ? null : v;
     };
 
-    const tISO = get("time"); // ISO 8601 string
+    const tISO = get("time"); // ISO string UTC
     const dt = tISO ? new Date(tISO) : null;
     const ts = dt ? `UTC ${dt.toISOString().slice(0,16).replace("T"," ")}` : "UTC —";
 
@@ -328,48 +374,115 @@ async function updateNDBCConditions(){
   }
 }
 
-/* ---------------- FORECAST (NWS, only today) ---------------- */
+/* ---------------- FORECAST (NWS: today hourly + 7-day daily) ---------------- */
+let NWS_CACHE = null; // { dailyPeriods, hourlyPeriods, fetchedAtMs }
+async function getNWSData(){
+  const now = Date.now();
+  if(NWS_CACHE && (now - NWS_CACHE.fetchedAtMs) < 15*60*1000) return NWS_CACHE;
+
+  const headers = { "Accept": "application/geo+json" };
+  const point = await fetchJSON(`https://api.weather.gov/points/${NWS_LAT},${NWS_LON}`, headers);
+
+  const dailyUrl  = point?.properties?.forecast;
+  const hourlyUrl = point?.properties?.forecastHourly;
+  if(!dailyUrl || !hourlyUrl) throw new Error("NWS forecast URLs missing.");
+
+  const [daily, hourly] = await Promise.all([
+    fetchJSON(dailyUrl, headers),
+    fetchJSON(hourlyUrl, headers)
+  ]);
+
+  const dailyPeriods  = daily?.properties?.periods || [];
+  const hourlyPeriods = hourly?.properties?.periods || [];
+
+  NWS_CACHE = { dailyPeriods, hourlyPeriods, fetchedAtMs: now };
+  return NWS_CACHE;
+}
+
 async function updateNWSForecast(selectedISO){
   const el = document.getElementById("wxLine");
+  el.textContent = "Loading…";
 
-  if(selectedISO !== todayISO()){
+  // Only show if within the 7-day horizon starting today
+  const delta = daysBetweenISO(todayISO(), selectedISO);
+  if(delta < 0 || delta > 7){
     el.textContent = "—";
     return;
   }
 
   try{
-    // NOTE: Browsers cannot set User-Agent; keep headers minimal.
-    const headers = { "Accept": "application/geo+json" };
+    const { dailyPeriods, hourlyPeriods } = await getNWSData();
 
-    const point = await fetchJSON(`https://api.weather.gov/points/${NWS_LAT},${NWS_LON}`, headers);
-    const hourlyUrl = point?.properties?.forecastHourly;
-    if(!hourlyUrl) { el.textContent="—"; return; }
+    // If selected day is today: show "next 12h" summary (your original behavior)
+    if(selectedISO === todayISO()){
+      const next = hourlyPeriods.slice(0, 12);
+      if(!next.length){ el.textContent = "—"; return; }
 
-    const hourly = await fetchJSON(hourlyUrl, headers);
-    const periods = hourly?.properties?.periods || [];
-    if(!periods.length) { el.textContent="—"; return; }
+      const nowP = next[0];
 
-    const next = periods.slice(0, 12);
-    const now = next[0];
+      const pops = next.map(p => p?.probabilityOfPrecipitation?.value).filter(v => v!=null);
+      const maxPop = pops.length ? Math.max(...pops) : null;
 
-    const pops = next.map(p => p?.probabilityOfPrecipitation?.value).filter(v => v!=null);
-    const maxPop = pops.length ? Math.max(...pops) : null;
+      const skies = next.map(p => p?.skyCover?.value).filter(v => v!=null);
+      const avgSky = skies.length ? skies.reduce((a,b)=>a+b,0)/skies.length : null;
 
-    const skies = next.map(p => p?.skyCover?.value).filter(v => v!=null);
-    const avgSky = skies.length ? skies.reduce((a,b)=>a+b,0)/skies.length : null;
+      const snowish = next.some(p => {
+        const s = (p?.shortForecast || "").toLowerCase();
+        return s.includes("snow") || s.includes("sleet") || s.includes("flurr");
+      });
 
-    const snowish = next.some(p => {
+      const parts = [];
+      if(nowP?.shortForecast) parts.push(`Now: ${nowP.shortForecast}`);
+      if(nowP?.temperature != null) parts.push(`Temp: ${fmtTempBoth(nowP.temperature, nowP.temperatureUnit || "F")}`);
+      if(nowP?.windSpeed || nowP?.windDirection) parts.push(`Wind: ${(nowP.windSpeed||"").trim()} ${(nowP.windDirection||"").trim()}`.trim());
+      parts.push(`Max precip (12h): ${maxPop!=null ? maxPop+"%" : "—"}`);
+      parts.push(`Snow risk: ${snowish ? "yes" : "no"}`);
+      parts.push(`Sky cover avg: ${avgSky!=null ? avgSky.toFixed(0)+"%" : "—"}`);
+
+      el.textContent = parts.join(" | ");
+      return;
+    }
+
+    // Otherwise: show the matching daily period(s) for that date
+    // NWS daily periods are day/night blocks. We'll grab all that match the selected date.
+    const matches = dailyPeriods.filter(p => {
+      const start = p?.startTime ? new Date(p.startTime) : null;
+      return start ? sameISODate(start, selectedISO) : false;
+    });
+
+    if(!matches.length){
+      el.textContent = "—";
+      return;
+    }
+
+    // Prefer to show a compact Day + Night if both exist
+    const dayP = matches.find(p => p.isDaytime);
+    const nightP = matches.find(p => p.isDaytime === false);
+
+    const parts = [];
+    if(dayP){
+      const pop = dayP?.probabilityOfPrecipitation?.value;
+      parts.push(
+        `Day: ${dayP.shortForecast || "—"} • ` +
+        `Temp: ${dayP.temperature != null ? fmtTempBoth(dayP.temperature, dayP.temperatureUnit || "F") : "—"} • ` +
+        `Precip: ${pop!=null ? pop+"%" : "—"}`
+      );
+    }
+    if(nightP){
+      const pop = nightP?.probabilityOfPrecipitation?.value;
+      parts.push(
+        `Night: ${nightP.shortForecast || "—"} • ` +
+        `Temp: ${nightP.temperature != null ? fmtTempBoth(nightP.temperature, nightP.temperatureUnit || "F") : "—"} • ` +
+        `Precip: ${pop!=null ? pop+"%" : "—"}`
+      );
+    }
+
+    // Add a quick “snow?” heuristic for the selected date
+    const snowish = matches.some(p => {
       const s = (p?.shortForecast || "").toLowerCase();
       return s.includes("snow") || s.includes("sleet") || s.includes("flurr");
     });
-
-    const parts = [];
-    if(now?.shortForecast) parts.push(`Now: ${now.shortForecast}`);
-    if(now?.temperature != null) parts.push(`Temp: ${now.temperature}°${now.temperatureUnit || "F"}`);
-    if(now?.windSpeed || now?.windDirection) parts.push(`Wind: ${(now.windSpeed||"").trim()} ${(now.windDirection||"").trim()}`.trim());
-    parts.push(`Max precip (12h): ${maxPop!=null ? maxPop+"%" : "—"}`);
     parts.push(`Snow risk: ${snowish ? "yes" : "no"}`);
-    parts.push(`Sky cover avg: ${avgSky!=null ? avgSky.toFixed(0)+"%" : "—"}`);
 
     el.textContent = parts.join(" | ");
   } catch(e){
@@ -596,7 +709,7 @@ async function loadDate(isoDate){
   updateNDBCConditions().catch(()=>{ document.getElementById("condLine").textContent="—"; });
   updateNWSForecast(isoDate).catch(()=>{ document.getElementById("wxLine").textContent="—"; });
 
-  const cacheKey = `bid_${isoDate}_coops8443970_curve+hilo_v5`;
+  const cacheKey = `bid_${isoDate}_coops8443970_curve+hilo_v6`;
   const cached = sessionStorage.getItem(cacheKey);
 
   if(cached){
@@ -614,6 +727,7 @@ async function loadDate(isoDate){
   }
 
   computeDayMaxHigh();
+  updateTideEventsLine();
   renderPlot();
   buildTable(isoDate);
 }
