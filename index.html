@@ -6,7 +6,7 @@
   <title>Boston Tide Height (NOAA)</title>
   <script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
   <style>
-    :root { --fg:#111; --muted:#666; --bg:#fff; --card:#f6f6f6; }
+    :root { --fg:#111; --muted:#666; --bg:#fff; --card:#f6f6f6; --line:#e5e5e5; }
     body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 24px; color: var(--fg); background: var(--bg); }
     h1 { font-size: 20px; margin: 0 0 12px; }
     .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; }
@@ -15,11 +15,10 @@
     button { cursor: pointer; border: 1px solid #ccc; background: #111; color: #fff; }
     button:disabled { opacity: .6; cursor: not-allowed; }
     .card { background: var(--card); padding: 14px; border-radius: 14px; margin: 14px 0; }
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; white-space: pre-wrap; }
     .small { font-size: 13px; color: var(--muted); }
     .err { color: #b00020; white-space: pre-wrap; }
 
-    /* Plot wrapper lets us put an overlay on top */
     .plotWrap{
       position: relative;
       width: 100%;
@@ -27,24 +26,29 @@
       border-radius: 12px;
       overflow: hidden;
       background: #fff;
+      border: 1px solid var(--line);
     }
-    #plot{
-      width: 100%;
-      height: 100%;
-    }
+    #plot{ width: 100%; height: 100%; }
 
-    /* The overlay captures touch/mouse so Plotly never gets drag gestures */
+    /* Overlay captures touch/mouse so Plotly never receives drag gestures */
     #overlay{
       position:absolute;
       inset:0;
       z-index: 10;
       background: rgba(0,0,0,0);
-      touch-action: none;      /* critical: no browser/plot gestures here */
+      touch-action: none;      /* critical */
       user-select: none;
       -webkit-user-select: none;
       -webkit-tap-highlight-color: rgba(0,0,0,0);
       cursor: crosshair;
     }
+
+    .tableWrap { overflow-x: auto; background:#fff; border:1px solid var(--line); border-radius: 12px; }
+    table { border-collapse: collapse; width: 100%; min-width: 420px; }
+    th, td { border-bottom: 1px solid var(--line); padding: 10px 12px; text-align: left; font-size: 14px; }
+    th { position: sticky; top: 0; background: #fff; z-index: 1; }
+    td.monoCell { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+    .pill { display:inline-block; padding: 2px 8px; border-radius: 999px; background:#eee; font-size:12px; color:#333; }
   </style>
 </head>
 <body>
@@ -69,7 +73,7 @@
         </select>
       </label>
       <label>
-        Units
+        Plot units
         <select id="units">
           <option value="english" selected>Feet</option>
           <option value="metric">Meters</option>
@@ -94,14 +98,42 @@
     </div>
   </div>
 
+  <div class="card">
+    <div class="row" style="justify-content: space-between;">
+      <div>
+        <div style="font-size:16px; font-weight:600;">15-minute table (05:00 → 22:00)</div>
+        <div class="small">Shows both feet and meters for the selected day.</div>
+      </div>
+      <div class="small"><span class="pill">Scrub updates the cursor + dot</span></div>
+    </div>
+
+    <div style="height:10px;"></div>
+    <div class="tableWrap">
+      <table id="tideTable">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Height (ft)</th>
+            <th>Height (m)</th>
+          </tr>
+        </thead>
+        <tbody id="tideTableBody"></tbody>
+      </table>
+    </div>
+  </div>
+
   <script>
     // ---------- Config ----------
     const STATION = "8443970"; // Boston, MA
     const NOAA = "https://api.tidesandcurrents.noaa.gov/api/prod/datagetter";
-    const INTERVAL_MIN = 6;
+    const INTERVAL_MIN = 6; // NOAA curve interval (6-min)
+    const TABLE_START_H = 5;   // 05:00
+    const TABLE_END_H = 22;    // 22:00
+    const TABLE_STEP_MIN = 15; // 15-minute intervals
 
-    // Current plot data (used by scrub overlay)
-    let CURRENT_PTS = [];   // [{t: Date, v: number, tStr: string}]
+    // Current plot data (for scrub overlay)
+    let CURRENT_PTS = [];     // curve points in plot-units: [{t:Date, v:number, tStr:string}]
+    let CURRENT_HILO = [];    // hilo points in plot-units
     let CURRENT_UNITS = "english";
     let CURRENT_DATE = null;
 
@@ -115,6 +147,7 @@
     function ymdCompact(isoDate) { return isoDate.replaceAll("-", ""); }
 
     function parseNOAATimeLocal(tStr) {
+      // NOAA returns "YYYY-MM-DD HH:MM" in lst_ldt (local time with DST).
       const [d, hm] = tStr.split(" ");
       const [Y, M, D] = d.split("-").map(Number);
       const [h, m] = hm.split(":").map(Number);
@@ -136,14 +169,22 @@
       return `${Y}-${M}-${D} ${h}:${m}`;
     }
 
+    function unitLabel(units) { return units === "metric" ? "m" : "ft"; }
+
+    function convertHeight(value, fromUnits, toUnits) {
+      if (fromUnits === toUnits) return value;
+      // 1 ft = 0.3048 m
+      if (fromUnits === "english" && toUnits === "metric") return value * 0.3048;
+      if (fromUnits === "metric" && toUnits === "english") return value / 0.3048;
+      return value;
+    }
+
     function linearInterpolate(t0, v0, t1, v1, t) {
       const x0 = t0.getTime(), x1 = t1.getTime(), x = t.getTime();
       if (x1 === x0) return v0;
       const w = (x - x0) / (x1 - x0);
       return v0 + w * (v1 - v0);
     }
-
-    function unitLabel(units) { return units === "metric" ? "m" : "ft"; }
 
     async function fetchNOAA(params) {
       const url = new URL(NOAA);
@@ -190,12 +231,14 @@
         format: "json"
       });
       return (data.predictions || [])
-        .map(p => ({ tStr: p.t, t: parseNOAATimeLocal(p.t), v: Number(p.v), type: p.type }))
+        .map(p => ({ tStr: p.t, t: parseNOAATimeLocal(p.t), v: Number(p.v), type: p.type })) // H/L
         .sort((a,b) => a.t - b.t);
     }
 
+    // Interpolated tide at time (in the same units as pts)
     function tideAtTime(pts, target) {
       if (!pts.length) throw new Error("Empty predictions array.");
+
       if (target <= pts[0].t) return { method: "clamped", t: target, v: pts[0].v, nearest: pts[0], trend: null };
       if (target >= pts[pts.length - 1].t) return { method: "clamped", t: target, v: pts[pts.length - 1].v, nearest: pts[pts.length - 1], trend: null };
 
@@ -207,8 +250,10 @@
       }
       const p0 = pts[lo], p1 = pts[hi];
       const v = linearInterpolate(p0.t, p0.v, p1.t, p1.v, target);
-      const nearest = (Math.abs(p0.t - target) <= Math.abs(p1.t - target)) ? p0 : p1;
+
       const trend = (p1.v > p0.v) ? "rising" : (p1.v < p0.v ? "falling" : "flat");
+      const nearest = (Math.abs(p0.t - target) <= Math.abs(p1.t - target)) ? p0 : p1;
+
       return { method: "interpolated", t: target, v, nearest, bracket: [p0, p1], trend };
     }
 
@@ -225,9 +270,53 @@
     function setStatus(msg) { document.getElementById("status").textContent = msg; }
     function setError(err) { document.getElementById("error").textContent = String(err?.message || err); }
 
+    // ---------- Table ----------
+    function buildTable({ isoDate, pts, ptsUnits }) {
+      const tbody = document.getElementById("tideTableBody");
+      tbody.innerHTML = "";
+
+      // Build target times: 05:00 to 22:00 inclusive, every 15 min
+      const [Y, M, D] = isoDate.split("-").map(Number);
+      const start = new Date(Y, M - 1, D, TABLE_START_H, 0, 0, 0);
+      const end = new Date(Y, M - 1, D, TABLE_END_H, 0, 0, 0);
+
+      const frag = document.createDocumentFragment();
+
+      for (let t = new Date(start); t <= end; t = new Date(t.getTime() + TABLE_STEP_MIN * 60000)) {
+        const at = tideAtTime(pts, t);
+        const vPlotUnits = at.v;
+
+        const vFt = convertHeight(vPlotUnits, ptsUnits, "english");
+        const vM  = convertHeight(vPlotUnits, ptsUnits, "metric");
+
+        const tr = document.createElement("tr");
+
+        const tdTime = document.createElement("td");
+        tdTime.className = "monoCell";
+        tdTime.textContent = `${pad2(t.getHours())}:${pad2(t.getMinutes())}`;
+
+        const tdFt = document.createElement("td");
+        tdFt.className = "monoCell";
+        tdFt.textContent = `${vFt.toFixed(2)}`;
+
+        const tdM = document.createElement("td");
+        tdM.className = "monoCell";
+        tdM.textContent = `${vM.toFixed(2)}`;
+
+        tr.appendChild(tdTime);
+        tr.appendChild(tdFt);
+        tr.appendChild(tdM);
+
+        frag.appendChild(tr);
+      }
+
+      tbody.appendChild(frag);
+    }
+
     // ---------- Plot + scrub overlay ----------
     function plotDay({ pts, hilo, target, targetVal, units, isoDate }) {
       CURRENT_PTS = pts;
+      CURRENT_HILO = hilo;
       CURRENT_UNITS = units;
       CURRENT_DATE = isoDate;
 
@@ -249,8 +338,8 @@
         xaxis: { title: "Local time (Boston)", type: "date", fixedrange: true },
         yaxis: { title: `Height (${unitLabel(units)})`, fixedrange: true },
         legend: { orientation: "h", y: -0.25 },
-        hovermode: false,     // we implement our own hover/scrub
-        dragmode: false,      // no zoom/pan/select
+        hovermode: false,
+        dragmode: false,
         shapes: [
           {
             type: "line",
@@ -262,15 +351,14 @@
         ]
       };
 
-      // Plotly is now “display-only”; overlay handles interaction
+      // Plotly becomes display-only: no gestures, no modebar
       Plotly.newPlot("plot", traces, layout, {
         responsive: true,
-        displayModeBar: false,  // remove toolbar entirely
+        displayModeBar: false,
         displaylogo: false,
-        staticPlot: true        // key: disables Plotly gestures (zoom/select) completely
+        staticPlot: true
       });
 
-      // After staticPlot, Plotly won't show hover/tooltips. We "scrub" ourselves.
       installScrubOverlay();
     }
 
@@ -279,78 +367,66 @@
       const plotDiv = document.getElementById("plot");
       const resEl = document.getElementById("result");
 
-      // Avoid stacking listeners if plot re-renders
-      overlay.onpointerdown = overlay.onpointermove = overlay.onpointerup = null;
-      overlay.ontouchstart = overlay.ontouchmove = overlay.ontouchend = null;
-      overlay.onmousemove = overlay.onmouseleave = null;
-
-      function nearestIndexForX(xDate) {
-        // binary search on CURRENT_PTS times
-        const x = xDate.getTime();
-        const pts = CURRENT_PTS;
-        let lo = 0, hi = pts.length - 1;
-        while (lo + 1 < hi) {
-          const mid = (lo + hi) >> 1;
-          if (pts[mid].t.getTime() <= x) lo = mid;
-          else hi = mid;
-        }
-        const a = pts[lo], b = pts[hi];
-        return (Math.abs(a.t.getTime() - x) <= Math.abs(b.t.getTime() - x)) ? lo : hi;
-      }
+      // Remove old listeners by replacing the node (clean + reliable)
+      const overlayClone = overlay.cloneNode(true);
+      overlay.parentNode.replaceChild(overlayClone, overlay);
 
       function scrubAtClientX(clientX) {
         if (!CURRENT_PTS.length || !plotDiv._fullLayout) return;
 
-        const rect = overlay.getBoundingClientRect();
+        const rect = overlayClone.getBoundingClientRect();
         const xpx = clientX - rect.left;
 
-        // Convert pixel -> data using Plotly's xaxis mapping
+        // Pixel -> Date using Plotly’s axis mapping
         const xaxis = plotDiv._fullLayout.xaxis;
         const xDate = new Date(xaxis.p2d(xpx));
 
-        // Clamp to day range
+        // Clamp to curve range
         const minT = CURRENT_PTS[0].t;
         const maxT = CURRENT_PTS[CURRENT_PTS.length - 1].t;
         const clamped = new Date(Math.min(maxT.getTime(), Math.max(minT.getTime(), xDate.getTime())));
 
-        const idx = nearestIndexForX(clamped);
-        const pt = CURRENT_PTS[idx];
+        // Interpolated value at clamped time
+        const at = tideAtTime(CURRENT_PTS, clamped);
+        const vPlot = at.v;
 
-        const u = unitLabel(CURRENT_UNITS);
-        const tappedText =
-          `Scrub: ${fmtLocal(pt.t)}\n` +
-          `Tide height: ${pt.v.toFixed(2)} ${u}`;
+        const vFt = convertHeight(vPlot, CURRENT_UNITS, "english");
+        const vM  = convertHeight(vPlot, CURRENT_UNITS, "metric");
 
-        const base = (resEl.textContent || "").split("\n\nScrub:")[0].split("\n\nTapped:")[0];
-        resEl.textContent = (base ? base + "\n\n" : "") + tappedText;
+        const scrubText =
+          `Selected: ${fmtLocal(clamped)}\n` +
+          `Tide height: ${vFt.toFixed(2)} ft  |  ${vM.toFixed(2)} m`;
 
-        // Move the vertical cursor line & move the selected marker
-        // shapes[0] is the vertical line; trace[3] is "Selected time"
+        // Keep any earlier lines above; overwrite the visible block cleanly
+        const base = (resEl.textContent || "").split("\n\nSelected:")[0];
+        resEl.textContent = (base ? base + "\n\n" : "") + scrubText;
+
+        // Move cursor line and selected dot (trace index 3)
         Plotly.relayout(plotDiv, {
-          "shapes[0].x0": pt.t,
-          "shapes[0].x1": pt.t
+          "shapes[0].x0": clamped,
+          "shapes[0].x1": clamped
         });
-        Plotly.restyle(plotDiv, { x: [[pt.t]], y: [[pt.v]] }, [3]);
+        Plotly.restyle(plotDiv, { x: [[clamped]], y: [[vPlot]] }, [3]);
       }
 
-      // Pointer events (covers modern iOS too)
-      overlay.addEventListener("pointerdown", (e) => {
+      // Pointer events (iOS/Android/desktop)
+      overlayClone.addEventListener("pointerdown", (e) => {
         e.preventDefault();
         scrubAtClientX(e.clientX);
-        overlay.setPointerCapture?.(e.pointerId);
+        overlayClone.setPointerCapture?.(e.pointerId);
       }, { passive: false });
 
-      overlay.addEventListener("pointermove", (e) => {
+      overlayClone.addEventListener("pointermove", (e) => {
         e.preventDefault();
         scrubAtClientX(e.clientX);
       }, { passive: false });
 
-      overlay.addEventListener("pointerup", (e) => {
+      overlayClone.addEventListener("pointerup", (e) => {
         e.preventDefault();
       }, { passive: false });
 
-      // Desktop fallback: hover scrub
-      overlay.addEventListener("mousemove", (e) => scrubAtClientX(e.clientX));
+      // Desktop “hover scrub”
+      overlayClone.addEventListener("mousemove", (e) => scrubAtClientX(e.clientX));
     }
 
     // ---------- Main ----------
@@ -382,20 +458,39 @@
           fetchDayHiLo({ isoDate, datum, units })
         ]);
 
+        // Summary at selected time
         const at = tideAtTime(pts, target);
         const { prev, next } = findNextHiLo(hilo, target);
 
-        const u = unitLabel(units);
+        const vFt = convertHeight(at.v, units, "english");
+        const vM  = convertHeight(at.v, units, "metric");
+
         const lines = [];
         lines.push(`Selected: ${fmtLocal(target)}`);
-        lines.push(`Tide height: ${at.v.toFixed(2)} ${u} (${at.method}${at.trend ? `, ${at.trend}` : ""})`);
-        if (at.nearest) lines.push(`Nearest NOAA point: ${at.nearest.tStr} → ${at.nearest.v.toFixed(2)} ${u}`);
-        if (prev) lines.push(`Previous: ${prev.type === "H" ? "High" : "Low"} @ ${prev.tStr} → ${prev.v.toFixed(2)} ${u}`);
-        if (next) lines.push(`Next: ${next.type === "H" ? "High" : "Low"} @ ${next.tStr} → ${next.v.toFixed(2)} ${u}`);
+        lines.push(`Tide height: ${vFt.toFixed(2)} ft  |  ${vM.toFixed(2)} m (${at.method}${at.trend ? `, ${at.trend}` : ""})`);
+        if (at.nearest) {
+          const nFt = convertHeight(at.nearest.v, units, "english");
+          const nM  = convertHeight(at.nearest.v, units, "metric");
+          lines.push(`Nearest NOAA point: ${at.nearest.tStr} → ${nFt.toFixed(2)} ft | ${nM.toFixed(2)} m`);
+        }
+        if (prev) {
+          const pFt = convertHeight(prev.v, units, "english");
+          const pM  = convertHeight(prev.v, units, "metric");
+          lines.push(`Previous: ${prev.type === "H" ? "High" : "Low"} @ ${prev.tStr} → ${pFt.toFixed(2)} ft | ${pM.toFixed(2)} m`);
+        }
+        if (next) {
+          const nFt2 = convertHeight(next.v, units, "english");
+          const nM2  = convertHeight(next.v, units, "metric");
+          lines.push(`Next: ${next.type === "H" ? "High" : "Low"} @ ${next.tStr} → ${nFt2.toFixed(2)} ft | ${nM2.toFixed(2)} m`);
+        }
 
         document.getElementById("result").textContent = lines.join("\n");
 
+        // Plot uses selected units; scrub readout always shows ft + m
         plotDay({ pts, hilo, target, targetVal: at.v, units, isoDate });
+
+        // Build the 15-min table (ft + m)
+        buildTable({ isoDate, pts, ptsUnits: units });
 
         setStatus("Done.");
       } catch (e) {
