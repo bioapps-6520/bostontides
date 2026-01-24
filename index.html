@@ -20,7 +20,6 @@
   .row { display:flex; gap:12px; flex-wrap:wrap; align-items:end; }
   label { display:grid; gap:6px; font-size:13px; color:#666; }
   input,button { font-size:14px; padding:10px 12px; border-radius:10px; border:1px solid #ddd; background:#fff; }
-  button { background:#111; color:#fff; cursor:pointer; }
 
   .pill { display:inline-block; padding:3px 10px; border-radius:999px; background:#eee; font-size:12px; }
   .kv{ display:grid; gap:8px; background:#fff; padding:10px 12px; border-radius:12px; border:1px solid #ddd; margin-top:10px;}
@@ -54,7 +53,7 @@
   }
 
   .tableWrap { max-height:350px; overflow:auto; background:#fff; border-radius:12px; border:1px solid #ddd;}
-  table { border-collapse:collapse; width:100%; min-width:680px;}
+  table { border-collapse:collapse; width:100%; min-width:720px;}
   th,td{ padding:10px 12px; border-bottom:1px solid #eee; font-size:14px;}
   th{ background:#fff; position:sticky; top:0;}
 </style>
@@ -75,8 +74,8 @@
   </div>
 
   <div class="kv">
-    <div class="line"><b>Conditions (NOAA latest):</b> <span id="condLine" class="pill">loading…</span></div>
-    <div class="line"><b>Forecast (NWS):</b> <span id="wxLine" class="pill">loading…</span></div>
+    <div class="line"><b>Conditions (NDBC latest):</b> <span id="condLine" class="pill">—</span></div>
+    <div class="line"><b>Forecast (NWS):</b> <span id="wxLine" class="pill">—</span></div>
     <div class="line"><b>Selected:</b> <span id="selectedLine" class="pill">drag on the curve</span></div>
   </div>
 </div>
@@ -95,7 +94,12 @@
   <div class="tableWrap">
     <table>
       <thead>
-        <tr><th>Time</th><th>ft</th><th>m</th><th>% of day max high</th></tr>
+        <tr>
+          <th>Time</th>
+          <th>% of day max high</th>
+          <th>ft</th>
+          <th>m</th>
+        </tr>
       </thead>
       <tbody id="tideTableBody"></tbody>
     </table>
@@ -103,15 +107,31 @@
 </div>
 
 <script>
-const STATION="8443970";
+/**
+ * Tides: CO-OPS station 8443970 (Boston, MA) predictions
+ * Conditions: NDBC realtime2 BHBM3.txt (maps to 8443970) for WTMP/ATMP/WSPD/WDIR
+ * Forecast: NWS hourly, only for today (local)
+ */
+const TIDE_STATION="8443970";
 const NOAA="https://api.tidesandcurrents.noaa.gov/api/prod/datagetter";
 const DATUM="MLLW";
+
+// NWS point (Boston). Forecast is “now forward”, so we only show it when selected date is today.
 const NWS_LAT=42.3601, NWS_LON=-71.0589;
 
-const pad=n=>String(n).padStart(2,"0");
-const today=()=>{const d=new Date();return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;}
-const ftToM=f=>f*0.3048, fToC=f=>(f-32)*5/9, ktsToMph=k=>k*1.15078;
+// NDBC realtime2 text file for station BHBM3 (Boston / 8443970).
+// Times are GMT; columns include WSPD (m/s), WDIR (deg), ATMP (C), WTMP (C) in standard met.
+const NDBC_REALTIME_TXT="https://www.ndbc.noaa.gov/data/realtime2/BHBM3.txt";
 
+const pad=n=>String(n).padStart(2,"0");
+const todayISO=()=>{const d=new Date();return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;}
+const ftToM=f=>f*0.3048, cToF=c=>(c*9/5)+32, msToMph=ms=>ms*2.236936;
+
+async function fetchText(url){
+  const r = await fetch(url, { cache: "no-store" });
+  if(!r.ok) throw new Error(`HTTP ${r.status}`);
+  return await r.text();
+}
 async function fetchJSON(url, headers){
   const r = await fetch(url, { headers });
   if(!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -124,12 +144,14 @@ let CURVE=[], HILO=[], DAY_MAX_HIGH=null;
 async function loadDay(date){
   document.getElementById("date").value=date;
 
-  // kick off met + forecast (don’t block tides)
-  updateNOAAConditions().catch(()=>{});
-  updateNWS().catch(()=>{});
+  // update conditions always (latest is fine for any selected day)
+  updateNDBCConditions().catch(()=>{});
+
+  // update forecast only if date == today
+  updateNWS(date).catch(()=>{ document.getElementById("wxLine").textContent = "—"; });
 
   const ymd=date.replace(/-/g,"");
-  const base=`${NOAA}?application=boston-dippers&station=${STATION}&datum=${DATUM}&time_zone=lst_ldt&units=english&format=json`;
+  const base=`${NOAA}?application=boston-dippers&station=${TIDE_STATION}&datum=${DATUM}&time_zone=lst_ldt&units=english&format=json`;
 
   const curveJson = await fetchJSON(`${base}&product=predictions&interval=6&begin_date=${ymd}&end_date=${ymd}`);
   CURVE=(curveJson.predictions||[])
@@ -166,7 +188,8 @@ function tideAt(t){
 
 function updateSelectedText(t,v){
   const pct = (DAY_MAX_HIGH && DAY_MAX_HIGH>0) ? Math.max(0,Math.min(100,100*v/DAY_MAX_HIGH)) : null;
-  const txt = `${t.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}  ${v.toFixed(2)} ft (${ftToM(v).toFixed(2)} m)` + (pct!=null?`  ${pct.toFixed(0)}% of max`:"");
+  const time = t.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+  const txt = `${time}  ${v.toFixed(2)} ft (${ftToM(v).toFixed(2)} m)` + (pct!=null?`  ${pct.toFixed(0)}% of max`:"");
   document.getElementById("selectedLine").textContent = txt;
 }
 
@@ -175,7 +198,7 @@ function drawPlot(){
   const xs=CURVE.map(p=>p.t);
   const ys=CURVE.map(p=>p.v);
 
-  // IMPORTANT: do NOT mutate xs[0] / CURVE[0]
+  // IMPORTANT: do NOT mutate CURVE[0].t
   const cursor = new Date(CURVE[0].t);
   cursor.setHours(10,0,0,0);
 
@@ -198,17 +221,18 @@ function drawPlot(){
   },{displayModeBar:false,staticPlot:true,responsive:true});
 
   updateSelectedText(cursor, tideAt(cursor));
-  installScrub(yMax);
+  installScrub();
 }
 
 // ----- scrub behavior -----
-function installScrub(yMax){
+function installScrub(){
   const overlay=document.getElementById("overlay");
   const box=document.getElementById("hoverBox");
 
   function placeBox(cx,cy){
+    // bias top-right, but keep on screen and above finger
     const left = Math.min(window.innerWidth-220, cx+14);
-    const top  = Math.max(8, cy-90); // stay above finger
+    const top  = Math.max(8, cy-96);
     box.style.left = `${Math.max(8,left)}px`;
     box.style.top  = `${top}px`;
   }
@@ -237,7 +261,6 @@ function installScrub(yMax){
   overlay.onpointermove = e => { e.preventDefault(); scrub(e.clientX,e.clientY); };
   overlay.onpointerup   = e => { /* keep tooltip */ };
 
-  // mobile fallback
   overlay.ontouchstart = e => { e.preventDefault(); const t=e.touches[0]; scrub(t.clientX,t.clientY); };
   overlay.ontouchmove  = e => { e.preventDefault(); const t=e.touches[0]; scrub(t.clientX,t.clientY); };
 }
@@ -253,58 +276,96 @@ function buildTable(){
       const t=new Date(d.getFullYear(),d.getMonth(),d.getDate(),h,m);
       const v=tideAt(t);
       const pct = (DAY_MAX_HIGH && DAY_MAX_HIGH>0) ? Math.max(0,Math.min(100,100*v/DAY_MAX_HIGH)) : null;
+
       tb.innerHTML += `<tr>
         <td>${pad(h)}:${pad(m)}</td>
+        <td>${pct!=null ? pct.toFixed(0)+'%' : '—'}</td>
         <td>${v.toFixed(2)}</td>
         <td>${ftToM(v).toFixed(2)}</td>
-        <td>${pct!=null ? pct.toFixed(0)+'%' : '—'}</td>
       </tr>`;
     }
   }
 }
 
-// ----- NOAA latest conditions -----
-async function noaaLatest(product){
-  const url = `${NOAA}?application=boston-dippers&station=${STATION}&product=${product}&date=latest&time_zone=lst_ldt&units=english&format=json`;
-  const j = await fetchJSON(url);
-  return (j && j.data && j.data.length) ? j.data[0] : null;
-}
-
-async function updateNOAAConditions(){
+// ----- NDBC latest conditions (WTMP/ATMP/WSPD/WDIR) -----
+async function updateNDBCConditions(){
   const el = document.getElementById("condLine");
-  el.textContent = "loading…";
+  el.textContent = "—";
 
-  const [wtemp, atemp, wind] = await Promise.allSettled([
-    noaaLatest("water_temperature"),
-    noaaLatest("air_temperature"),
-    noaaLatest("wind")
-  ]);
+  // NDBC standard met file: header line begins with "#YY  MM DD hh mm ..."
+  // Next line is column names. Then data rows. Most recent is usually the first data row after headers.
+  const txt = await fetchText(NDBC_REALTIME_TXT);
+
+  const lines = txt.split(/\r?\n/).filter(Boolean);
+  if(lines.length < 5) { el.textContent = "—"; return; }
+
+  // Find the column header line (starts with "#YY" in many files; sometimes "#YY" is itself the header)
+  // Typically:
+  // line0: "#YY  MM DD hh mm WDIR WSPD ... ATMP WTMP ..."
+  // next lines: data
+  let headerLineIdx = -1;
+  for(let i=0;i<Math.min(lines.length,5);i++){
+    if(lines[i].includes("WTMP") || lines[i].includes("ATMP") || lines[i].includes("WSPD")){
+      headerLineIdx = i;
+      break;
+    }
+  }
+  if(headerLineIdx === -1){ el.textContent = "—"; return; }
+
+  const header = lines[headerLineIdx].replace(/^#/, "").trim().split(/\s+/);
+  const dataLine = lines[headerLineIdx+1];
+  if(!dataLine){ el.textContent = "—"; return; }
+  const fields = dataLine.trim().split(/\s+/);
+
+  const idx = (name) => header.indexOf(name);
+
+  const iYY = idx("YY"), iMM = idx("MM"), iDD = idx("DD"), ihh = idx("hh"), imm = idx("mm");
+  const iWDIR = idx("WDIR"), iWSPD = idx("WSPD"), iATMP = idx("ATMP"), iWTMP = idx("WTMP");
+
+  // Safe getter with NDBC missing sentinel "MM"
+  const get = (i) => (i>=0 && i<fields.length && fields[i] !== "MM") ? fields[i] : null;
+
+  const YY = get(iYY), MM = get(iMM), DD = get(iDD), hh = get(ihh), mm = get(imm);
+  const ts = (YY && MM && DD && hh && mm) ? `GMT ${YY}-${MM}-${DD} ${hh}:${mm}` : "GMT —";
+
+  const wtmpC = get(iWTMP);
+  const atmpC = get(iATMP);
+  const wspdMs = get(iWSPD);
+  const wdir = get(iWDIR);
 
   const parts = [];
 
-  if(wtemp.status==="fulfilled" && wtemp.value?.v!=null){
-    const f = Number(wtemp.value.v);
-    parts.push(`Water ${f.toFixed(1)}°F (${fToC(f).toFixed(1)}°C)`);
-  } else parts.push("Water —");
+  if(wtmpC != null){
+    const c = Number(wtmpC);
+    parts.push(`Water ${cToF(c).toFixed(1)}°F (${c.toFixed(1)}°C)`);
+  } else {
+    parts.push("Water —");
+  }
 
-  if(atemp.status==="fulfilled" && atemp.value?.v!=null){
-    const f = Number(atemp.value.v);
-    parts.push(`Air ${f.toFixed(1)}°F (${fToC(f).toFixed(1)}°C)`);
-  } else parts.push("Air —");
+  if(atmpC != null){
+    const c = Number(atmpC);
+    parts.push(`Air ${cToF(c).toFixed(1)}°F (${c.toFixed(1)}°C)`);
+  } else {
+    parts.push("Air —");
+  }
 
-  if(wind.status==="fulfilled" && wind.value?.s!=null){
-    const mph = ktsToMph(Number(wind.value.s));
-    const dr  = wind.value.dr ? ` ${wind.value.dr}` : "";
-    parts.push(`Wind ${mph.toFixed(1)} mph${dr}`);
-  } else parts.push("Wind —");
+  if(wspdMs != null){
+    const mph = msToMph(Number(wspdMs));
+    parts.push(`Wind ${mph.toFixed(1)} mph${wdir!=null ? " " + wdir + "°" : ""}`);
+  } else {
+    parts.push("Wind —");
+  }
 
-  el.textContent = parts.join(" | ");
+  el.textContent = `${parts.join(" | ")}  •  ${ts}`;
 }
 
-// ----- NWS forecast -----
-async function updateNWS(){
+// ----- NWS forecast (only for today) -----
+async function updateNWS(selectedISO){
   const el=document.getElementById("wxLine");
-  el.textContent="loading…";
+
+  const isToday = (selectedISO === todayISO());
+  if(!isToday){ el.textContent = "—"; return; }
+
   try{
     const headers = { "Accept":"application/geo+json", "User-Agent":"BostonIrishDippersTides/1.0 (github pages)" };
     const p = await fetchJSON(`https://api.weather.gov/points/${NWS_LAT},${NWS_LON}`, headers);
@@ -314,13 +375,13 @@ async function updateNWS(){
     if(!now) throw new Error("No hourly forecast");
     el.textContent = `${now.shortForecast} | ${now.temperature}°${now.temperatureUnit} | Wind ${now.windSpeed}`;
   } catch(e){
-    el.textContent="Forecast unavailable";
+    el.textContent="—";
   }
 }
 
 // init
 document.getElementById("date").onchange = e => loadDay(e.target.value);
-loadDay(today());
+loadDay(todayISO());
 </script>
 
 </body>
