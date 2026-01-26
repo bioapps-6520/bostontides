@@ -20,7 +20,7 @@
     .card { background: var(--card); padding:14px; border-radius:14px; margin: 14px 0; }
     .row { display:flex; gap:12px; flex-wrap:wrap; align-items:end; }
     label { display:grid; gap:6px; font-size:13px; color: var(--muted); }
-    input,button { font-size:14px; padding:10px 12px; border-radius:10px; border:1px solid #ddd; background:#fff; }
+    input,select,button { font-size:14px; padding:10px 12px; border-radius:10px; border:1px solid #ddd; background:#fff; }
     button.secondary { cursor:pointer; border:1px solid #ddd; background:#fff; color:#111; }
 
     .kv {
@@ -28,9 +28,18 @@
       background:#fff; border:1px solid var(--line);
       border-radius:12px; padding:10px 12px;
     }
-    .kv .line { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
-    .k { font-size:12px; color: var(--muted); }
-    .pill { display:inline-block; padding:3px 10px; border-radius:999px; background:#eee; font-size:12px; color:#333; }
+    .kv .line { display:flex; gap:10px; flex-wrap:wrap; align-items:flex-start; }
+    .k { font-size:12px; color: var(--muted); min-width: 135px; }
+    .pill {
+      display:inline-block;
+      padding:6px 10px;
+      border-radius:12px;
+      background:#eee;
+      font-size:13px;
+      color:#333;
+      line-height:1.25;
+      white-space:pre-line; /* allow newline in Conditions pill */
+    }
     .small { font-size:13px; color: var(--muted); }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
 
@@ -109,7 +118,7 @@
 
     <div class="kv">
       <div class="line">
-        <span class="k">Conditions (buoy 44013 latest):</span>
+        <span class="k">Conditions:</span>
         <span class="pill" id="condLine">—</span>
       </div>
       <div class="line">
@@ -127,8 +136,8 @@
     </div>
 
     <div class="small" style="margin-top:10px;">
-      Tide station: <span class="mono">8443970</span> (Boston, MA) • Datum <span class="mono">MLLW</span>.
-      Water temp/wind from buoy <span class="mono">44013</span>.
+      Tide station: <span class="mono">8443970</span> (Boston, MA) • Datum <span class="mono">MLLW</span>.<br>
+      Primary water temp: Maine coastal <span class="mono">8418150</span> (Portland, ME). Offshore context: buoy <span class="mono">44013</span>.
     </div>
   </div>
 
@@ -173,12 +182,10 @@ const NOAA_COOPS = "https://api.tidesandcurrents.noaa.gov/api/prod/datagetter";
 const DATUM = "MLLW";
 const CURVE_INTERVAL_MIN = 6;
 
-const TABLE_START_H = 5;
-const TABLE_END_H = 22;
-const TABLE_STEP_MIN = 15;
+// Maine coastal water temp via CO-OPS (Portland, ME)
+const COASTAL_TEMP_STATION = "8418150";
 
 // Buoy via ERDDAP (CORS-friendly)
-const NDBC_STATION = "44013";
 const ERDDAP_BASE = "https://data.neracoos.org/erddap/tabledap/NDBC_44013.json";
 const ERDDAP_LATEST =
   `${ERDDAP_BASE}?time,WTMP,ATMP,WSPD,WDIR&orderByMax(%22time%22)`;
@@ -228,7 +235,6 @@ function sameISODate(a, iso){
   return `${y}-${m}-${d}` === iso;
 }
 function daysBetweenISO(aIso, bIso){
-  // aIso and bIso are YYYY-MM-DD; return b-a in days (bIso - aIso)
   const [ay,am,ad] = aIso.split("-").map(Number);
   const [by,bm,bd] = bIso.split("-").map(Number);
   const a = Date.UTC(ay, am-1, ad);
@@ -245,7 +251,6 @@ function fmtTempBoth(value, unit){
   if(unit === "C"){
     return `${cToF(x).toFixed(0)}°F (${x.toFixed(0)}°C)`;
   }
-  // unknown
   return `${x}`;
 }
 async function fetchJSON(url, headers){
@@ -259,7 +264,7 @@ async function fetchDayCurveFeet(isoDate){
   const ymd = ymdCompact(isoDate);
   const data = await fetchJSON(`${NOAA_COOPS}?product=predictions&application=boston-irish-dippers&station=${TIDE_STATION}` +
     `&begin_date=${ymd}%2000:00&end_date=${ymd}%2023:59&datum=${DATUM}&time_zone=lst_ldt&units=english` +
-    `&interval=${CURVE_INTERVAL_MIN}&format=json`);
+    `&interval=${6}&format=json`);
   if(!data.predictions) throw new Error("No predictions returned (curve).");
   return data.predictions.map(p => ({ t: new Date(p.t), vFt: Number(p.v) })).sort((a,b)=>a.t-b.t);
 }
@@ -315,67 +320,87 @@ function updateTideEventsLine(){
   el.textContent = `${highTxt} | ${lowTxt}`;
 }
 
-/* ---------------- CONDITIONS (ERDDAP latest) ---------------- */
+/* ---------------- CONDITIONS ---------------- */
+async function fetchCOOPSLatestWaterTempF(stationId){
+  const url =
+    `${NOAA_COOPS}?product=water_temperature&application=boston-irish-dippers` +
+    `&station=${stationId}&date=latest&time_zone=gmt&units=english&format=json`;
+
+  const j = await fetchJSON(url);
+  const row = j?.data?.[0];
+  if(!row) return null;
+
+  const v = Number(row.v); // Fahrenheit (units=english)
+  if(Number.isNaN(v)) return null;
+
+  const t = row.t ? new Date(row.t.replace(" ", "T") + "Z") : null; // GMT -> Date
+  return { tempF: v, timeUTC: t };
+}
+
 async function updateNDBCConditions(){
   const el = document.getElementById("condLine");
   el.textContent = "Loading…";
 
   try{
-    const j = await fetchJSON(ERDDAP_LATEST);
-    const table = j && j.table;
-    const names = table && table.columnNames;
-    const rows  = table && table.rows;
-    if(!names || !rows || !rows.length){
-      el.textContent = "—";
-      return;
+    const [buoyJ, coastal] = await Promise.all([
+      fetchJSON(ERDDAP_LATEST).catch(()=>null),
+      fetchCOOPSLatestWaterTempF(COASTAL_TEMP_STATION).catch(()=>null)
+    ]);
+
+    // Coastal line (primary)
+    let coastalLine = "Coastal water (Portland ME): —";
+    if(coastal?.tempF != null){
+      const f = coastal.tempF;
+      coastalLine = `Coastal water (Portland ME): ${f.toFixed(1)}°F (${fToC(f).toFixed(1)}°C)`;
     }
 
-    const row = rows[0];
-    const idx = (col) => names.indexOf(col);
-    const get = (col) => {
-      const i = idx(col);
-      if(i < 0) return null;
-      const v = row[i];
-      return (v === null || v === undefined) ? null : v;
-    };
+    // Buoy line (secondary)
+    let buoyLine = "Offshore buoy (44013): —";
+    if(buoyJ?.table?.columnNames && buoyJ?.table?.rows?.length){
+      const names = buoyJ.table.columnNames;
+      const row = buoyJ.table.rows[0];
+      const idx = (col) => names.indexOf(col);
+      const get = (col) => {
+        const i = idx(col);
+        if(i < 0) return null;
+        const v = row[i];
+        return (v === null || v === undefined) ? null : v;
+      };
 
-    const tISO = get("time"); // ISO string UTC
-    const dt = tISO ? new Date(tISO) : null;
-    const ts = dt ? `UTC ${dt.toISOString().slice(0,16).replace("T"," ")}` : "UTC —";
+      const wtmpC = get("WTMP");
+      const atmpC = get("ATMP");
+      const wspd  = get("WSPD");
+      const wdir  = get("WDIR");
 
-    const wtmpC = get("WTMP");
-    const atmpC = get("ATMP");
-    const wspd  = get("WSPD"); // m/s
-    const wdir  = get("WDIR"); // degrees true
+      const parts = [];
+      if(wtmpC != null){
+        const f = cToF(Number(wtmpC));
+        parts.push(`water ${f.toFixed(1)}°F (${fToC(f).toFixed(1)}°C)`);
+      }
+      if(atmpC != null){
+        const f = cToF(Number(atmpC));
+        parts.push(`air ${f.toFixed(1)}°F (${fToC(f).toFixed(1)}°C)`);
+      }
+      if(wspd != null){
+        const mph = msToMph(Number(wspd));
+        const deg = (wdir != null) ? Number(wdir) : null;
+        const card = (deg != null && !Number.isNaN(deg)) ? degToCardinal(deg) : "";
+        const dirTxt = (deg != null && !Number.isNaN(deg)) ? ` ${card}` : "";
+        parts.push(`wind ${mph.toFixed(1)} mph${dirTxt}`.trim());
+      }
 
-    const parts = [];
+      buoyLine = `Offshore buoy (44013): ${parts.length ? parts.join(" • ") : "—"}`;
+    }
 
-    if(wtmpC != null){
-      const c = Number(wtmpC);
-      parts.push(`Water ${cToF(c).toFixed(1)}°F (${c.toFixed(1)}°C)`);
-    } else parts.push("Water —");
-
-    if(atmpC != null){
-      const c = Number(atmpC);
-      parts.push(`Air ${cToF(c).toFixed(1)}°F (${c.toFixed(1)}°C)`);
-    } else parts.push("Air —");
-
-    if(wspd != null){
-      const mph = msToMph(Number(wspd));
-      const deg = (wdir != null) ? Number(wdir) : null;
-      const card = (deg != null && !Number.isNaN(deg)) ? degToCardinal(deg) : "";
-      const dirTxt = (deg != null && !Number.isNaN(deg)) ? ` ${card} (${deg}°)` : "";
-      parts.push(`Wind ${mph.toFixed(1)} mph${dirTxt}`);
-    } else parts.push("Wind —");
-
-    el.textContent = `${parts.join(" | ")}  •  ${ts}`;
+    // Two lines in the same pill:
+    el.textContent = `${coastalLine}\n${buoyLine}`;
   } catch(e){
     el.textContent = "—";
   }
 }
 
-/* ---------------- FORECAST (NWS: today hourly + 7-day daily) ---------------- */
-let NWS_CACHE = null; // { dailyPeriods, hourlyPeriods, fetchedAtMs }
+/* ---------------- FORECAST (NWS) ---------------- */
+let NWS_CACHE = null;
 async function getNWSData(){
   const now = Date.now();
   if(NWS_CACHE && (now - NWS_CACHE.fetchedAtMs) < 15*60*1000) return NWS_CACHE;
@@ -403,7 +428,6 @@ async function updateNWSForecast(selectedISO){
   const el = document.getElementById("wxLine");
   el.textContent = "Loading…";
 
-  // Only show if within the 7-day horizon starting today
   const delta = daysBetweenISO(todayISO(), selectedISO);
   if(delta < 0 || delta > 7){
     el.textContent = "—";
@@ -413,11 +437,9 @@ async function updateNWSForecast(selectedISO){
   try{
     const { dailyPeriods, hourlyPeriods } = await getNWSData();
 
-    // If selected day is today: show "next 12h" summary (your original behavior)
     if(selectedISO === todayISO()){
       const next = hourlyPeriods.slice(0, 12);
       if(!next.length){ el.textContent = "—"; return; }
-
       const nowP = next[0];
 
       const pops = next.map(p => p?.probabilityOfPrecipitation?.value).filter(v => v!=null);
@@ -443,8 +465,6 @@ async function updateNWSForecast(selectedISO){
       return;
     }
 
-    // Otherwise: show the matching daily period(s) for that date
-    // NWS daily periods are day/night blocks. We'll grab all that match the selected date.
     const matches = dailyPeriods.filter(p => {
       const start = p?.startTime ? new Date(p.startTime) : null;
       return start ? sameISODate(start, selectedISO) : false;
@@ -455,7 +475,6 @@ async function updateNWSForecast(selectedISO){
       return;
     }
 
-    // Prefer to show a compact Day + Night if both exist
     const dayP = matches.find(p => p.isDaytime);
     const nightP = matches.find(p => p.isDaytime === false);
 
@@ -477,7 +496,6 @@ async function updateNWSForecast(selectedISO){
       );
     }
 
-    // Add a quick “snow?” heuristic for the selected date
     const snowish = matches.some(p => {
       const s = (p?.shortForecast || "").toLowerCase();
       return s.includes("snow") || s.includes("sleet") || s.includes("flurr");
@@ -501,6 +519,7 @@ function updateSelectedLine(dt, vFt){
   document.getElementById("selectedLine").textContent =
     `${fmtHM(dt)}  Tide ${vFt.toFixed(2)} ft (${vM.toFixed(2)} m)  •  ${pctTxt}`;
 }
+
 function renderPlot(){
   const plotDiv = document.getElementById("plot");
 
@@ -540,6 +559,7 @@ function renderPlot(){
   updateSelectedLine(cursor, cursorY);
   installScrub();
 }
+
 function installScrub(){
   const overlay = document.getElementById("overlay");
   const plotDiv = document.getElementById("plot");
@@ -706,10 +726,12 @@ document.getElementById("jump").addEventListener("click", () => {
 });
 
 async function loadDate(isoDate){
+  // conditions + forecast
   updateNDBCConditions().catch(()=>{ document.getElementById("condLine").textContent="—"; });
   updateNWSForecast(isoDate).catch(()=>{ document.getElementById("wxLine").textContent="—"; });
 
-  const cacheKey = `bid_${isoDate}_coops8443970_curve+hilo_v6`;
+  // tides cache
+  const cacheKey = `bid_${isoDate}_coops8443970_curve+hilo_v7`;
   const cached = sessionStorage.getItem(cacheKey);
 
   if(cached){
