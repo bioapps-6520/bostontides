@@ -10,6 +10,19 @@
 
   <script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
 
+  <!-- Leaflet (Coastal Temp section) -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+  ></script>
+
   <style>
     :root { --fg:#111; --muted:#666; --bg:#fff; --card:#f6f6f6; --line:#e5e5e5; }
     body { font-family: system-ui,-apple-system,Segoe UI,Roboto,sans-serif; margin: 16px; color: var(--fg); background: var(--bg); }
@@ -98,6 +111,41 @@
     th, td { border-bottom: 1px solid var(--line); padding: 10px 12px; text-align: left; font-size: 14px; }
     th { position: sticky; top: 0; background: #fff; z-index: 1; }
     td.monoCell { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+
+    /* ---------------- Coastal Temps section (scoped) ---------------- */
+    #coastalTemps h2 { font-size:18px; margin:0; }
+    #coastalTemps .sub { color: var(--muted); font-size:13px; margin: 6px 0 12px 0; }
+    #coastalTemps .wrap { display:grid; grid-template-columns:1fr; gap:12px; }
+    #coastalTemps .cardInner { background: #fff; border:1px solid var(--line); border-radius:12px; padding:10px 12px; }
+    #coastalTemps .pillLite { display:inline-block; font-size:12px; padding:3px 8px; border-radius:999px; border:1px solid var(--line); background:#fff; color: var(--muted); }
+    #coastalTemps .right { text-align:right; white-space:nowrap; }
+    #coastalTemps table { border-collapse: collapse; width: 100%; min-width: 760px; }
+    #coastalTemps thead th { text-align:left; font-size:12px; color: var(--muted); font-weight:650; padding:10px 12px; border-bottom:1px solid var(--line); background:#fbfbfb; position: sticky; top: 0; z-index: 1; }
+    #coastalTemps tbody td { padding:10px 12px; border-bottom:1px solid var(--line); font-size:14px; vertical-align: middle; }
+    #coastalTemps tbody tr:hover { background:#fafafa; cursor:pointer; }
+    #coastalTemps tbody tr:last-child td { border-bottom:none; }
+    #coastalTemps .muted { color: var(--muted); }
+    #coastalTemps .tableWrap2 { overflow:auto; border:1px solid var(--line); border-radius: 12px; background:#fff; max-height: 420px; }
+
+    #coastalTemps #coastalMap { width:100%; height:420px; border-radius:12px; border:1px solid var(--line); overflow:hidden; background:#fff; }
+
+    #coastalTemps .temp-marker {
+      background:#fff;
+      border:1px solid rgba(0,0,0,0.2);
+      border-radius:10px;
+      padding:6px 8px;
+      box-shadow:0 1px 8px rgba(0,0,0,0.12);
+      font-size:12px;
+      line-height:1.15;
+      white-space:nowrap;
+    }
+    #coastalTemps .temp-marker .name { font-weight:650; font-size:11px; color: var(--muted); margin-bottom:2px; }
+    #coastalTemps .temp-marker .temp { font-weight:750; font-size:12px; }
+
+    @media (min-width: 980px) {
+      #coastalTemps .wrap { grid-template-columns: 1.05fr 0.95fr; align-items: start; }
+      #coastalTemps #coastalMap { height:520px; }
+    }
   </style>
 </head>
 
@@ -172,6 +220,39 @@
         </thead>
         <tbody id="tideTableBody"></tbody>
       </table>
+    </div>
+  </div>
+
+  <!-- ================= Coastal Temps section (added) ================= -->
+  <div class="card" id="coastalTemps">
+    <div class="row" style="justify-content: space-between; align-items: baseline;">
+      <div>
+        <h2>Coastal Water Temperature (NOAA stations)</h2>
+        <div class="sub">Live water temperatures from stations that publish <span class="mono">water_temperature</span> via NOAA CO-OPS. Click a row or label to open the station page.</div>
+      </div>
+      <div class="small"><span class="pillLite" id="coastalLastUpdated">Loading…</span></div>
+    </div>
+
+    <div class="wrap">
+      <div class="cardInner">
+        <div class="tableWrap2">
+          <table aria-label="Coastal water temperature stations">
+            <thead>
+              <tr>
+                <th>Station</th>
+                <th class="right">Water Temp</th>
+                <th class="right">Air Temp</th>
+                <th class="right">As of</th>
+              </tr>
+            </thead>
+            <tbody id="coastalTbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="cardInner">
+        <div id="coastalMap" aria-label="Coastal station map"></div>
+      </div>
     </div>
   </div>
 
@@ -720,6 +801,207 @@ function buildTable(isoDate){
   count.textContent = `${n} rows`;
 }
 
+/* ---------------- Coastal Temps (added) ---------------- */
+/* labelOffsetPx nudges the label boxes to avoid overlap */
+const coastalStations = [
+  {
+    id:"8418150",
+    name:"Portland Harbor, ME",
+    short:"Portland",
+    lat:43.6567,
+    lon:-70.2467,
+    home:"https://tidesandcurrents.noaa.gov/stationhome.html?id=8418150",
+    labelOffsetPx: { x: 0, y: 0 }
+  },
+  {
+    id:"8413320",
+    name:"Bar Harbor, ME",
+    short:"Bar Harbor",
+    lat:44.3917,
+    lon:-68.2050,
+    home:"https://tidesandcurrents.noaa.gov/stationhome.html?id=8413320",
+    labelOffsetPx: { x: 0, y: 0 }
+  },
+  {
+    id:"8447930",
+    name:"Woods Hole, MA",
+    short:"Woods Hole",
+    lat:41.5233,
+    lon:-70.6717,
+    home:"https://tidesandcurrents.noaa.gov/stationhome.html?id=8447930",
+    labelOffsetPx: { x: 0, y: 0 }
+  },
+  {
+    id:"8449130",
+    name:"Nantucket Island, MA",
+    short:"Nantucket",
+    lat:41.28553,
+    lon:-70.09819,
+    home:"https://tidesandcurrents.noaa.gov/stationhome.html?id=8449130",
+    /* push Nantucket label slightly right+down to avoid Woods Hole overlap */
+    labelOffsetPx: { x: 52, y: 18 }
+  }
+];
+
+function makeCoopsLatestUrl(station, product, units="english"){
+  const params = new URLSearchParams({
+    product,
+    application: "boston-irish-dippers",
+    station,
+    date: "latest",
+    time_zone: "lst_ldt",
+    units,
+    format: "json"
+  });
+  return `${NOAA_COOPS}?${params.toString()}`;
+}
+
+async function fetchCoopsLatest(stationId, product, units="english"){
+  const url = makeCoopsLatestUrl(stationId, product, units);
+  const j = await fetchJSON(url);
+  const row = j?.data?.[0];
+  if(!row) return null;
+  const v = Number(row.v);
+  if(Number.isNaN(v)) return null;
+  return { v, t: row.t || null };
+}
+
+function fmtTempFC(f){
+  if(f == null) return "—";
+  const F = Number(f);
+  return `${F.toFixed(1)}°F (${fToC(F).toFixed(1)}°C)`;
+}
+
+async function loadCoastalTemps(){
+  const tbody = document.getElementById("coastalTbody");
+  const upd = document.getElementById("coastalLastUpdated");
+  tbody.innerHTML = "";
+  upd.textContent = "Loading…";
+
+  // Map init (only once)
+  if(!window._coastalMap){
+    const m = L.map("coastalMap", {
+      zoomControl: false,
+      attributionControl: true,
+      dragging: false,
+      scrollWheelZoom: false,
+      doubleClickZoom: false,
+      boxZoom: false,
+      keyboard: false,
+      touchZoom: false
+    });
+
+    // prevent any programmatic/gesture zooms
+    m.options.minZoom = 0;
+    m.options.maxZoom = 18;
+    m.setView([42.6, -70.2], 6);
+
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 18,
+      attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(m);
+
+    // Extra hard-disable
+    m.tap && m.tap.disable();
+    m.scrollWheelZoom.disable();
+    m.doubleClickZoom.disable();
+    m.boxZoom.disable();
+    m.keyboard.disable();
+    m.dragging.disable();
+    m.touchZoom.disable();
+
+    window._coastalMap = m;
+    window._coastalMarkers = new Map();
+  }
+
+  const map = window._coastalMap;
+  const markers = window._coastalMarkers;
+
+  function makeIcon(st, waterF){
+    const line = (waterF == null) ? "—" : `${waterF.toFixed(1)}°F / ${fToC(waterF).toFixed(1)}°C`;
+    const dx = st.labelOffsetPx?.x || 0;
+    const dy = st.labelOffsetPx?.y || 0;
+
+    const html = `
+      <div class="temp-marker" style="transform: translate(${dx}px, ${dy}px);">
+        <div class="name">${st.short}</div>
+        <div class="temp">${line}</div>
+      </div>`;
+    return L.divIcon({ html, className:"", iconSize:null });
+  }
+
+  function upsertMarker(st, waterF){
+    const icon = makeIcon(st, waterF);
+    const ex = markers.get(st.id);
+    if(ex){ ex.setIcon(icon); return; }
+    const mk = L.marker([st.lat, st.lon], { icon, interactive: true }).addTo(map);
+    mk.on("click", () => { window.location.href = st.home; });
+    markers.set(st.id, mk);
+  }
+
+  // Placeholder markers first
+  for(const st of coastalStations) upsertMarker(st, null);
+
+  const rows = [];
+  for(const st of coastalStations){
+    const data = { waterF:null, airF:null, asOf:"—" };
+
+    try{
+      const w = await fetchCoopsLatest(st.id, "water_temperature", "english");
+      if(w){ data.waterF = w.v; data.asOf = w.t || data.asOf; }
+    } catch(_) {}
+
+    // Optional: Air temperature
+    try{
+      const a = await fetchCoopsLatest(st.id, "air_temperature", "english");
+      if(a){ data.airF = a.v; if(data.asOf === "—") data.asOf = a.t || data.asOf; }
+    } catch(_) {}
+
+    rows.push({ st, data });
+    upsertMarker(st, data.waterF);
+  }
+
+  tbody.innerHTML = rows.map(({st, data}) => {
+    const waterTxt = fmtTempFC(data.waterF);
+    const airTxt = (data.airF == null) ? "—" : fmtTempFC(data.airF);
+    const asOf = data.asOf || "—";
+
+    return `
+      <tr data-home="${st.home}" title="Open station page">
+        <td>
+          <div><a href="${st.home}" target="_blank" rel="noopener">${st.name}</a></div>
+          <div class="muted">${st.id}</div>
+        </td>
+        <td class="right">${waterTxt}</td>
+        <td class="right">${airTxt}</td>
+        <td class="right">${asOf}</td>
+      </tr>
+    `;
+  }).join("");
+
+  tbody.querySelectorAll("tr[data-home]").forEach(tr => {
+    tr.addEventListener("click", (ev) => {
+      if (ev.target && ev.target.tagName && ev.target.tagName.toLowerCase() === "a") return;
+      window.location.href = tr.getAttribute("data-home");
+    });
+  });
+
+  upd.textContent = `Last refreshed: ${new Date().toLocaleString()}`;
+
+  // Fit map once, then LOCK it so user cannot zoom out/in beyond this view.
+  const bounds = L.latLngBounds(coastalStations.map(s => [s.lat, s.lon])).pad(0.25);
+  map.fitBounds(bounds);
+
+  // lock bounds + lock zoom level
+  map.setMaxBounds(bounds);
+  map.options.maxBoundsViscosity = 1.0;
+  const z = map.getZoom();
+  map.setMinZoom(z);
+  map.setMaxZoom(z);
+
+  setTimeout(() => map.invalidateSize(), 0);
+}
+
 /* ---------------- MAIN ---------------- */
 document.getElementById("jump").addEventListener("click", () => {
   document.getElementById("tableSection").scrollIntoView({ behavior:"smooth", block:"start" });
@@ -752,6 +1034,12 @@ async function loadDate(isoDate){
   updateTideEventsLine();
   renderPlot();
   buildTable(isoDate);
+
+  // Coastal temps at page bottom
+  loadCoastalTemps().catch(() => {
+    const upd = document.getElementById("coastalLastUpdated");
+    if(upd) upd.textContent = "Failed to load coastal temps.";
+  });
 }
 
 const dateEl = document.getElementById("date");
