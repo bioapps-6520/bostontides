@@ -12,7 +12,7 @@ A lightweight, mobile-friendly tide + conditions viewer for Boston.
 - See **high/low tide event times**
 - See latest **water temperature (Boston and Portland ME coastal stations, plus offshore buoy)**, air temperature, and wind
 - See **NWS forecast** for the selected date (only when within the next ~7 days)
-- **Beach bacteria warning**: shows rain at Logan over the last 48h and a warning at 0.5 in or more (higher bacteria risk at harbor beaches from Quincy to Castle Island), plus links to the Mass DPH beach dashboard (summer testing only, and how often each beach is tested varies), BWSC sewer overflow alerts, and Save the Harbor's report card
+- **Beach bacteria warning**: shows rain at Logan over the last 48h and a warning at 0.5 in or more (higher bacteria risk at harbor beaches from Quincy to Castle Island), plus links to the Mass DPH beach dashboard (summer only), BWSC sewer overflow alerts, and Save the Harbor's report card
 
 Hosted via **GitHub Pages** (static HTML/JS, no backend).
 
