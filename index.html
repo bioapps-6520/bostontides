@@ -54,6 +54,9 @@
       white-space:pre-line; /* allow newline in Conditions pill */
     }
     .small { font-size:13px; color: var(--muted); }
+    .beachCol { display:grid; gap:6px; flex:1; min-width:0; }
+    .beachLinks a { color: inherit; }
+    .pill.warn { background:#fde7c2; color:#6b3d00; }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
 
     .plotWrap{
@@ -175,7 +178,14 @@
       </div>
       <div class="line">
         <span class="k">Beach bacteria:</span>
-        <span class="pill"><a href="https://www.mass.gov/info-details/interactive-beach-water-quality-dashboard" target="_blank" rel="noopener">Mass DPH beach dashboard</a> (daily, Memorial Day–Labor Day) • <a href="https://www.savetheharbor.org/policy/water-quality" target="_blank" rel="noopener">Save the Harbor report card</a></span>
+        <div class="beachCol">
+          <span class="pill" id="beachLine">Loading…</span>
+          <div class="small beachLinks">
+            <a href="https://www.mass.gov/info-details/interactive-beach-water-quality-dashboard" target="_blank" rel="noopener">Mass DPH beach dashboard</a> (daily, Memorial Day–Labor Day) •
+            <a href="https://www.bwsc.org/environment-education/water-sewer-and-stormwater/cso-public-notification" target="_blank" rel="noopener">BWSC sewer overflow alerts</a> •
+            <a href="https://www.savetheharbor.org/policy/water-quality" target="_blank" rel="noopener">Save the Harbor report card</a>
+          </div>
+        </div>
       </div>
       <div class="line">
         <span class="k">Tide events:</span>
@@ -282,6 +292,14 @@ const ERDDAP_LATEST =
 // NWS (Boston)
 const NWS_LAT = 42.3601;
 const NWS_LON = -71.0589;
+
+// Rain at Logan (via Iowa Environmental Mesonet, CORS-friendly): hourly
+// routine METAR precipitation, summed over the last 48h. Boston health
+// officials advise avoiding harbor water for 48h after heavy rain.
+const RAIN_STATION = "BOS";
+const RAIN_WINDOW_H = 48;
+const RAIN_WARN_IN = 0.5;
+const BEACH_AREA = "harbor beaches from Quincy to Castle Island";
 
 /* ---------------- STATE ---------------- */
 let CURVE = []; // [{t:Date, vFt:number}]
@@ -606,6 +624,54 @@ async function updateNWSForecast(selectedISO){
     el.textContent = parts.join(" | ");
   } catch(e){
     if(seq === NWS_SEQ) el.textContent = "—";
+  }
+}
+
+/* ---------------- BEACH / RAIN ---------------- */
+function isoMinuteUTC(d){ return d.toISOString().slice(0,16) + "Z"; }
+
+async function fetchRainLastHoursIn(hours){
+  const end = new Date();
+  const start = new Date(end.getTime() - hours*3600000);
+  const params = new URLSearchParams({
+    station: RAIN_STATION, data: "p01i", tz: "UTC", format: "onlycomma",
+    missing: "M", trace: "T", report_type: "3",
+    sts: isoMinuteUTC(start), ets: isoMinuteUTC(end)
+  });
+  const r = await fetch(`https://mesonet.agron.iastate.edu/cgi-bin/request/asos.py?${params}`, { cache:"no-store" });
+  if(!r.ok) throw new Error(`HTTP ${r.status}`);
+  const lines = (await r.text()).trim().split("\n").slice(1); // drop header
+  let total = 0, reports = 0, missing = 0;
+  for(const line of lines){
+    const v = line.split(",")[2];
+    if(v === undefined) continue;
+    reports++;
+    if(v === "M"){ missing++; continue; }
+    if(v === "T") continue; // trace
+    const x = Number(v);
+    if(!Number.isNaN(x)) total += x;
+  }
+  return { totalIn: total, reports, missing };
+}
+
+async function updateBeachLine(){
+  const el = document.getElementById("beachLine");
+  el.classList.remove("warn");
+  el.textContent = "Loading…";
+  try{
+    const { totalIn, reports, missing } = await fetchRainLastHoursIn(RAIN_WINDOW_H);
+    const gaps = (reports < RAIN_WINDOW_H - 6 || missing > 6) ? " (some reports missing)" : "";
+    if(totalIn >= RAIN_WARN_IN){
+      el.classList.add("warn");
+      el.textContent =
+        `⚠️ Heavy rain: ${totalIn.toFixed(2)} in at Logan in the last ${RAIN_WINDOW_H}h${gaps}.\n` +
+        `Higher bacteria risk at ${BEACH_AREA}. Health officials advise staying out of the water for 48h after heavy rain.`;
+    } else {
+      el.textContent =
+        `Rain at Logan, last ${RAIN_WINDOW_H}h: ${totalIn.toFixed(2)} in${gaps} (warning at ${RAIN_WARN_IN} in).`;
+    }
+  } catch(e){
+    el.textContent = "Rain data unavailable. Check the links below.";
   }
 }
 
@@ -1117,6 +1183,9 @@ async function loadDate(isoDate){
 }
 
 installScrub();
+
+// Rain-based beach warning is "now", not tied to the selected date.
+updateBeachLine();
 
 // Coastal temps don't depend on the selected date; load once.
 loadCoastalTemps().catch(() => {
