@@ -10,7 +10,7 @@ A lightweight, mobile-friendly tide + conditions viewer for Boston.
   - **% of day max high** (relative to the highest high tide event that day)
   - height in **feet** and **meters**
 - See **high/low tide event times**
-- See latest **water temperature (offshore buoy)**, air temperature, and wind
+- See latest **water temperature (Boston tide station, with offshore buoy for context)**, air temperature, and wind
 - See **NWS forecast** for the selected date (only when within the next ~7 days)
 
 Hosted via **GitHub Pages** (static HTML/JS, no backend).
@@ -66,7 +66,13 @@ Example parameters used:
 
 ---
 
-### 2) Water temp / wind / air temp (NDBC buoy via ERDDAP)
+### 2) Coastal water temp (NOAA CO-OPS)
+**Station:** `8443970` — Boston, MA (same station as the tides)  
+Product `water_temperature`, `date=latest`. If Boston has no recent reading, the app falls back to `8418150` (Portland, ME) and labels the line accordingly.
+
+---
+
+### 3) Offshore water temp / wind / air temp (NDBC buoy via ERDDAP)
 **Buoy:** `44013` (offshore; may differ from beach temperature)
 
 Directly fetching `https://www.ndbc.noaa.gov/data/realtime2/44013.txt` is blocked by browser CORS on GitHub Pages.  
@@ -81,13 +87,13 @@ So this app uses a CORS-friendly **ERDDAP JSON** endpoint that includes:
 `https://data.neracoos.org/erddap/tabledap/NDBC_44013.json?time,WTMP,ATMP,WSPD,WDIR&orderByMax("time")`
 
 Displayed as:
-- Water (offshore buoy): °F and °C
+- Water (offshore buoy, context only): °F and °C
 - Air: °F and °C
 - Wind: mph + direction
 
 ---
 
-### 3) Weather forecast (NWS / weather.gov)
+### 4) Weather forecast (NWS / weather.gov)
 Uses the National Weather Service API for Boston coordinates.
 
 **Point endpoint:**
