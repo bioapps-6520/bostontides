@@ -185,7 +185,7 @@
 
     <div class="small" style="margin-top:10px;">
       Tide station: <span class="mono">8443970</span> (Boston, MA) • Datum <span class="mono">MLLW</span>.<br>
-      Primary water temp: Boston <span class="mono">8443970</span> (falls back to Portland, ME <span class="mono">8418150</span>). Offshore context: buoy <span class="mono">44013</span>.
+      Coastal water temp: Boston <span class="mono">8443970</span> and Portland, ME <span class="mono">8418150</span>. Offshore context: buoy <span class="mono">44013</span>.
     </div>
   </div>
 
@@ -263,10 +263,12 @@ const NOAA_COOPS = "https://api.tidesandcurrents.noaa.gov/api/prod/datagetter";
 const DATUM = "MLLW";
 const CURVE_INTERVAL_MIN = 6;
 
-// Primary water temp: the Boston tide station itself (CO-OPS).
-// Fallback if Boston has no recent reading: Portland, ME.
-const COASTAL_TEMP_STATION = { id: TIDE_STATION, name: "Boston" };
-const COASTAL_TEMP_FALLBACK = { id: "8418150", name: "Portland ME" };
+// Coastal water temps via CO-OPS: Boston harbor, plus Portland ME
+// (in winter Portland has tracked beach temps better than offshore buoy 44013).
+const COASTAL_TEMP_STATIONS = [
+  { id: TIDE_STATION, name: "Boston" },
+  { id: "8418150",    name: "Portland ME" }
+];
 
 // Buoy via ERDDAP (CORS-friendly)
 const ERDDAP_BASE = "https://data.neracoos.org/erddap/tabledap/NDBC_44013.json";
@@ -433,23 +435,18 @@ async function updateNDBCConditions(){
   el.textContent = "Loading…";
 
   try{
-    const [buoyJ, primary] = await Promise.all([
+    const [buoyJ, ...coastal] = await Promise.all([
       fetchJSON(ERDDAP_LATEST).catch(()=>null),
-      fetchCOOPSLatestWaterTempF(COASTAL_TEMP_STATION.id).catch(()=>null)
+      ...COASTAL_TEMP_STATIONS.map(st => fetchCOOPSLatestWaterTempF(st.id).catch(()=>null))
     ]);
 
-    let coastal = primary, coastalSrc = COASTAL_TEMP_STATION;
-    if(coastal?.tempF == null){
-      coastal = await fetchCOOPSLatestWaterTempF(COASTAL_TEMP_FALLBACK.id).catch(()=>null);
-      coastalSrc = COASTAL_TEMP_FALLBACK;
-    }
-
-    // Coastal line (primary)
-    let coastalLine = `Coastal water (${COASTAL_TEMP_STATION.name}): —`;
-    if(coastal?.tempF != null){
-      const f = coastal.tempF;
-      coastalLine = `Coastal water (${coastalSrc.name}): ${f.toFixed(1)}°F (${fToC(f).toFixed(1)}°C)`;
-    }
+    // Coastal lines (one per CO-OPS station)
+    const coastalLines = COASTAL_TEMP_STATIONS.map((st, i) => {
+      const f = coastal[i]?.tempF;
+      return (f != null)
+        ? `Coastal water (${st.name}): ${f.toFixed(1)}°F (${fToC(f).toFixed(1)}°C)`
+        : `Coastal water (${st.name}): —`;
+    });
 
     // Buoy line (secondary)
     let buoyLine = "Offshore buoy (44013): —";
@@ -489,8 +486,8 @@ async function updateNDBCConditions(){
       buoyLine = `Offshore buoy (44013): ${parts.length ? parts.join(" • ") : "—"}`;
     }
 
-    // Two lines in the same pill:
-    el.textContent = `${coastalLine}\n${buoyLine}`;
+    // One line per source in the same pill:
+    el.textContent = [...coastalLines, buoyLine].join("\n");
   } catch(e){
     el.textContent = "—";
   }

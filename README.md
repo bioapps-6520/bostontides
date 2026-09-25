@@ -10,7 +10,7 @@ A lightweight, mobile-friendly tide + conditions viewer for Boston.
   - **% of day max high** (relative to the highest high tide event that day)
   - height in **feet** and **meters**
 - See **high/low tide event times**
-- See latest **water temperature (Boston tide station, with offshore buoy for context)**, air temperature, and wind
+- See latest **water temperature (Boston and Portland ME coastal stations, plus offshore buoy)**, air temperature, and wind
 - See **NWS forecast** for the selected date (only when within the next ~7 days)
 
 Hosted via **GitHub Pages** (static HTML/JS, no backend).
@@ -67,8 +67,8 @@ Example parameters used:
 ---
 
 ### 2) Coastal water temp (NOAA CO-OPS)
-**Station:** `8443970` — Boston, MA (same station as the tides)  
-Product `water_temperature`, `date=latest`. If Boston has no recent reading, the app falls back to `8418150` (Portland, ME) and labels the line accordingly.
+**Stations:** `8443970` — Boston, MA (same station as the tides) and `8418150` — Portland, ME  
+Product `water_temperature`, `date=latest`. Both are shown. In winter, Portland has tracked Boston beach temperatures more closely than the offshore buoy, which can read 5°F or more warmer.
 
 ---
 
