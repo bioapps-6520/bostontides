@@ -5,7 +5,7 @@ A lightweight, mobile-friendly tide + conditions viewer for Boston.
 - Pick a date (Boston local time)
 - View the **full-day tide curve** (NOAA predictions)
 - Drag/scrub on the plot to read tide height at any time
-- See a **15-minute table** from 05:00 to 22:00 with:
+- See an **hourly table** from 05:00 to 22:00 with:
   - time
   - **% of day max high** (relative to the highest high tide event that day)
   - height in **feet** and **meters**
