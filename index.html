@@ -207,7 +207,7 @@
 
     <div class="small" style="margin-top:10px;">
       Tide station: <span class="mono">8443970</span> (Boston, MA) • Datum <span class="mono">MLLW</span>.<br>
-      Coastal water temp: Boston <span class="mono">8443970</span> and Portland, ME <span class="mono">8418150</span>. Offshore context: buoy <span class="mono">44013</span>.
+      Local wind/air: Castle Island <span class="mono">8444069</span>. Water temp: Portland, ME <span class="mono">8418150</span>, plus Gallops Island (Stone Living Lab) once its sensor reports. Offshore context: buoy <span class="mono">44013</span>.
     </div>
   </div>
 
@@ -285,12 +285,21 @@ const NOAA_COOPS = "https://api.tidesandcurrents.noaa.gov/api/prod/datagetter";
 const DATUM = "MLLW";
 const CURVE_INTERVAL_MIN = 6;
 
-// Coastal water temps via CO-OPS: Boston harbor, plus Portland ME
-// (in winter Portland has tracked beach temps better than offshore buoy 44013).
+// Coastal water temp via CO-OPS: Portland ME (in winter it has tracked beach
+// temps better than offshore buoy 44013). Boston 8443970 has no water temp sensor.
 const COASTAL_TEMP_STATIONS = [
-  { id: TIDE_STATION, name: "Boston" },
-  { id: "8418150",    name: "Portland ME" }
+  { id: "8418150", name: "Portland ME" }
 ];
+
+// Castle Island (NOAA PORTS 8444069), 1.8 km from L Street: wind + air temp.
+const CASTLE_ISLAND_STATION = "8444069";
+
+// Stone Living Lab tide gauge at Gallops Island (NERACOOS ERDDAP, CORS-friendly).
+// Its water temperature sensor has not reported yet (new in Aug 2026); the line
+// only appears once there is a reading from the last 24h.
+const GALLOPS_LATEST =
+  "https://data.neracoos.org/erddap/tabledap/SLL-2699.json" +
+  "?time,water_temperature&time%3E=now-1day&water_temperature!=NaN&orderByMax(%22time%22)";
 
 // Buoy via ERDDAP (CORS-friendly)
 const ERDDAP_BASE = "https://data.neracoos.org/erddap/tabledap/NDBC_44013.json";
@@ -483,15 +492,75 @@ async function fetchCOOPSLatestWaterTempF(stationId){
   return { tempF: v, timeUTC: t };
 }
 
+async function fetchCoopsLatestRow(stationId, product, units){
+  const url =
+    `${NOAA_COOPS}?product=${product}&application=boston-irish-dippers` +
+    `&station=${stationId}&date=latest&time_zone=lst_ldt&units=${units}&format=json`;
+  const j = await fetchJSON(url);
+  return j?.data?.[0] || null;
+}
+
+// Castle Island: air temp (°F) and wind (metric = m/s, converted to mph).
+async function fetchCastleIsland(){
+  const [air, wind] = await Promise.all([
+    fetchCoopsLatestRow(CASTLE_ISLAND_STATION, "air_temperature", "english").catch(()=>null),
+    fetchCoopsLatestRow(CASTLE_ISLAND_STATION, "wind", "metric").catch(()=>null)
+  ]);
+  const num = (x) => { const v = Number(x); return (x === "" || x == null || Number.isNaN(v)) ? null : v; };
+  const airF   = num(air?.v);
+  const windMs = num(wind?.s);
+  const gustMs = num(wind?.g);
+  const dir    = wind?.dr || (num(wind?.d) != null ? degToCardinal(num(wind.d)) : "");
+  const t      = wind?.t || air?.t || null;
+  if(airF == null && windMs == null) return null;
+  return { airF, windMph: windMs != null ? msToMph(windMs) : null,
+           gustMph: gustMs != null ? msToMph(gustMs) : null, dir,
+           asOf: t ? parseNoaaLocal(t) : null };
+}
+
+// Gallops Island water temp (°F); ERDDAP answers 404 when there is no data.
+async function fetchGallopsWaterF(){
+  const r = await fetch(GALLOPS_LATEST, { cache:"no-store" });
+  if(r.status === 404) return null;
+  if(!r.ok) throw new Error(`HTTP ${r.status}`);
+  const j = await r.json();
+  const names = j?.table?.columnNames || [];
+  const row = j?.table?.rows?.[0];
+  if(!row) return null;
+  const v = Number(row[names.indexOf("water_temperature")]);
+  return Number.isNaN(v) ? null : v;
+}
+
 async function updateNDBCConditions(){
   const el = document.getElementById("condLine");
   el.textContent = "Loading…";
 
   try{
-    const [buoyJ, ...coastal] = await Promise.all([
+    const [buoyJ, castle, gallopsF, ...coastal] = await Promise.all([
       fetchJSON(ERDDAP_LATEST).catch(()=>null),
+      fetchCastleIsland().catch(()=>null),
+      fetchGallopsWaterF().catch(()=>null),
       ...COASTAL_TEMP_STATIONS.map(st => fetchCOOPSLatestWaterTempF(st.id).catch(()=>null))
     ]);
+
+    // Harbor water (Gallops Island), only once the sensor reports
+    const harborLines = (gallopsF != null)
+      ? [`Harbor water (Gallops Is.): ${gallopsF.toFixed(1)}°F (${fToC(gallopsF).toFixed(1)}°C)`]
+      : [];
+
+    // Castle Island wind + air (closest to the beaches)
+    let castleLine = "Castle Island: —";
+    if(castle){
+      const parts = [];
+      if(castle.airF != null) parts.push(`air ${castle.airF.toFixed(1)}°F (${fToC(castle.airF).toFixed(1)}°C)`);
+      if(castle.windMph != null){
+        let w = `wind ${castle.windMph.toFixed(0)} mph${castle.dir ? " " + castle.dir : ""}`;
+        if(castle.gustMph != null) w += `, gusts ${castle.gustMph.toFixed(0)}`;
+        parts.push(w);
+      }
+      if(castle.asOf) parts.push(`as of ${fmtHM(castle.asOf)}`);
+      castleLine = `Castle Island: ${parts.join(" • ")}`;
+    }
 
     // Coastal lines (one per CO-OPS station)
     const coastalLines = COASTAL_TEMP_STATIONS.map((st, i) => {
@@ -540,7 +609,7 @@ async function updateNDBCConditions(){
     }
 
     // One line per source in the same pill:
-    el.textContent = [...coastalLines, buoyLine].join("\n");
+    el.textContent = [castleLine, ...harborLines, ...coastalLines, buoyLine].join("\n");
   } catch(e){
     el.textContent = "—";
   }
@@ -924,15 +993,6 @@ function buildTable(isoDate){
 /* ---------------- Coastal Temps (added) ---------------- */
 /* labelOffsetPx nudges the label boxes to avoid overlap */
 const coastalStations = [
-  {
-    id:"8443970",
-    name:"Boston, MA",
-    short:"Boston",
-    lat:42.3539,
-    lon:-71.0503,
-    home:"https://tidesandcurrents.noaa.gov/stationhome.html?id=8443970",
-    labelOffsetPx: { x: 0, y: 0 }
-  },
   {
     id:"8418150",
     name:"Portland Harbor, ME",
