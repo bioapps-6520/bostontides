@@ -12,7 +12,7 @@ A lightweight, mobile-friendly tide + conditions viewer for Boston.
 - See **high/low tide event times**
 - See latest **water temperature (Boston and Portland ME coastal stations, plus offshore buoy)**, air temperature, and wind
 - See **NWS forecast** for the selected date (only when within the next ~7 days)
-- Links to **beach bacteria results**: the Mass DPH beach water quality dashboard (enterococcus sampling, daily Memorial Day–Labor Day) and Save the Harbor's annual beach report card
+- **Beach bacteria warning**: shows rain at Logan over the last 48h and a warning at 0.5 in or more (higher bacteria risk at harbor beaches from Quincy to Castle Island), plus links to the Mass DPH beach dashboard (daily, Memorial Day–Labor Day), BWSC sewer overflow alerts, and Save the Harbor's report card
 
 Hosted via **GitHub Pages** (static HTML/JS, no backend).
 
@@ -94,7 +94,16 @@ Displayed as:
 
 ---
 
-### 4) Weather forecast (NWS / weather.gov)
+### 4) Rain at Logan (Iowa Environmental Mesonet)
+Hourly routine METAR precipitation (`p01i`, inches) for station `BOS`, summed over the last 48 hours:
+
+`https://mesonet.agron.iastate.edu/cgi-bin/request/asos.py?station=BOS&data=p01i&report_type=3&format=onlycomma&tz=UTC&sts=...&ets=...`
+
+This endpoint sends `Access-Control-Allow-Origin: *`, so the static page can read it. At 0.5 in or more, the Beach bacteria line turns into a warning, following Boston public health guidance to avoid harbor water for 48 hours after heavy rain.
+
+---
+
+### 5) Weather forecast (NWS / weather.gov)
 Uses the National Weather Service API for Boston coordinates.
 
 **Point endpoint:**
