@@ -5,8 +5,14 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Boston Irish Dippers Tide Height (NOAA predictions)</title>
 
-  <link rel="icon" type="image/png" href="seahorse.png">
-  <link rel="apple-touch-icon" href="seahorse.png">
+  <link rel="icon" type="image/png" href="icon-192.png">
+  <!-- Home-screen app ("Add to Home Screen") -->
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <meta name="theme-color" content="#ffffff">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Dippers Tides">
 
   <script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
 
@@ -328,8 +334,9 @@ function cToF(c){ return (c * 9/5) + 32; }
 function fToC(f){ return (f - 32) * 5/9; }
 function msToMph(ms){ return ms * 2.236936; }
 
+// One time format across the page: 24-hour HH:MM (matches the plot axis).
 function fmtHM(dt){
-  return dt.toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"});
+  return `${pad2(dt.getHours())}:${pad2(dt.getMinutes())}`;
 }
 function fmtLocal(dt){
   const Y = dt.getFullYear();
@@ -356,6 +363,28 @@ function daysBetweenISO(aIso, bIso){
   const b = Date.UTC(by, bm-1, bd);
   return Math.round((b - a) / 86400000);
 }
+// NWS wind speed strings: "10 mph" or "5 to 10 mph". Use the higher value.
+function windMphFromText(s){
+  const nums = String(s || "").match(/\d+(\.\d+)?/g);
+  return nums ? Math.max(...nums.map(Number)) : null;
+}
+// NWS wind chill formula; only defined for T <= 50°F and wind > 3 mph.
+function windChillF(tempF, windMph){
+  if(tempF == null || windMph == null) return null;
+  if(tempF > 50 || windMph <= 3) return null;
+  const v = Math.pow(windMph, 0.16);
+  return 35.74 + 0.6215*tempF - 35.75*v + 0.4275*tempF*v;
+}
+function periodTempF(p){
+  if(p?.temperature == null) return null;
+  const t = Number(p.temperature);
+  return (p.temperatureUnit === "C") ? cToF(t) : t;
+}
+function feelsLikeText(p){
+  const wc = windChillF(periodTempF(p), windMphFromText(p?.windSpeed));
+  return (wc == null) ? null : `Feels like: ${fmtTempBoth(wc, "F")}`;
+}
+
 function fmtTempBoth(value, unit){
   if(value == null) return "—";
   const x = Number(value);
@@ -576,6 +605,8 @@ async function updateNWSForecast(selectedISO){
       if(nowP?.shortForecast) parts.push(`Now: ${nowP.shortForecast}`);
       if(nowP?.temperature != null) parts.push(`Temp: ${fmtTempBoth(nowP.temperature, nowP.temperatureUnit || "F")}`);
       if(nowP?.windSpeed || nowP?.windDirection) parts.push(`Wind: ${(nowP.windSpeed||"").trim()} ${(nowP.windDirection||"").trim()}`.trim());
+      const feels = feelsLikeText(nowP);
+      if(feels) parts.push(feels);
       parts.push(`Max precip (12h): ${maxPop!=null ? maxPop+"%" : "—"}`);
       parts.push(`Snow risk: ${snowish ? "yes" : "no"}`);
       parts.push(`Sky cover avg: ${avgSky!=null ? avgSky.toFixed(0)+"%" : "—"}`);
@@ -603,6 +634,7 @@ async function updateNWSForecast(selectedISO){
       parts.push(
         `Day: ${dayP.shortForecast || "—"} • ` +
         `Temp: ${dayP.temperature != null ? fmtTempBoth(dayP.temperature, dayP.temperatureUnit || "F") : "—"} • ` +
+        (feelsLikeText(dayP) ? `${feelsLikeText(dayP)} • ` : "") +
         `Precip: ${pop!=null ? pop+"%" : "—"}`
       );
     }
@@ -611,6 +643,7 @@ async function updateNWSForecast(selectedISO){
       parts.push(
         `Night: ${nightP.shortForecast || "—"} • ` +
         `Temp: ${nightP.temperature != null ? fmtTempBoth(nightP.temperature, nightP.temperatureUnit || "F") : "—"} • ` +
+        (feelsLikeText(nightP) ? `${feelsLikeText(nightP)} • ` : "") +
         `Precip: ${pop!=null ? pop+"%" : "—"}`
       );
     }
@@ -704,7 +737,7 @@ function renderPlot(){
     { x: [cursor], y: [cursorY], mode:"markers", name:"Selected", marker:{size:11} }
   ], {
     margin: { l: 60, r: 20, t: 10, b: 60 },
-    xaxis: { title: "Local time (Boston)", type:"date", fixedrange:true },
+    xaxis: { title: "Local time (Boston)", type:"date", fixedrange:true, tickformat:"%H:%M" },
     yaxis: { title: "Height (ft)", fixedrange:true },
     showlegend: false,
     hovermode: false,
@@ -858,7 +891,7 @@ function buildTable(isoDate){
 
     const tdTime = document.createElement("td");
     tdTime.className = "monoCell";
-    tdTime.textContent = `${pad2(t.getHours())}:${pad2(t.getMinutes())}`;
+    tdTime.textContent = fmtHM(t);
 
     const tdPct = document.createElement("td");
     tdPct.className = "monoCell";
@@ -1058,7 +1091,7 @@ async function loadCoastalTemps(){
   tbody.innerHTML = rows.map(({st, data}) => {
     const waterTxt = fmtTempFC(data.waterF);
     const airTxt = (data.airF == null) ? "—" : fmtTempFC(data.airF);
-    const asOf = data.asOf || "—";
+    const asOf = (data.asOf && data.asOf !== "—") ? fmtLocal(parseNoaaLocal(data.asOf)) : "—";
 
     return `
       <tr data-home="${st.home}" title="Open station page">
@@ -1080,7 +1113,7 @@ async function loadCoastalTemps(){
     });
   });
 
-  upd.textContent = `Last refreshed: ${new Date().toLocaleString()}`;
+  upd.textContent = `Last refreshed: ${fmtLocal(new Date())}`;
 
   // Fit map once, then LOCK it so user cannot zoom out/in beyond this view.
   const bounds = L.latLngBounds(coastalStations.map(s => [s.lat, s.lon])).pad(0.25);
