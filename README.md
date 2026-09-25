@@ -10,7 +10,7 @@ A lightweight, mobile-friendly tide + conditions viewer for Boston.
   - **% of day max high** (relative to the highest high tide event that day)
   - height in **feet** and **meters**
 - See **high/low tide event times**
-- See latest **water temperature (Boston and Portland ME coastal stations, plus offshore buoy)**, air temperature, and wind
+- See latest **wind and air temperature at Castle Island**, **water temperature** (Portland ME coastal station, Gallops Island once it reports, plus offshore buoy)
 - See **NWS forecast** for the selected date (only when within the next ~7 days)
 - **Beach bacteria warning**: shows rain at Logan over the last 48h and a warning at 0.5 in or more (higher bacteria risk at harbor beaches from Quincy to Castle Island), plus links to the Mass DPH beach dashboard (summer only), BWSC sewer overflow alerts, and Save the Harbor's report card
 
@@ -67,9 +67,14 @@ Example parameters used:
 
 ---
 
-### 2) Coastal water temp (NOAA CO-OPS)
-**Stations:** `8443970` — Boston, MA (same station as the tides) and `8418150` — Portland, ME  
-Product `water_temperature`, `date=latest`. Both are shown. In winter, Portland has tracked Boston beach temperatures more closely than the offshore buoy, which can read 5°F or more warmer.
+### 2) Local conditions and coastal water temp
+**Castle Island `8444069` (NOAA PORTS, CO-OPS)**, 1.8 km from L Street: latest `air_temperature` (`units=english`, °F) and `wind` (`units=metric`, m/s, shown in mph with direction and gusts).
+
+**Gallops Island tide gauge `SLL-2699` (Stone Living Lab, via NERACOOS ERDDAP):** `water_temperature` (°F). The sensor went in August 2026 but has not reported water temperature yet, so this line only appears once there is a reading from the last 24 hours.
+
+**Portland, ME `8418150` (CO-OPS)** `water_temperature`, `date=latest`. In winter, Portland has tracked Boston beach temperatures more closely than the offshore buoy, which can read 5°F or more warmer.
+
+Note: the Boston tide station `8443970` has no water temperature sensor.
 
 ---
 
