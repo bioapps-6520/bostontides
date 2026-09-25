@@ -121,7 +121,8 @@ If not available, the app displays `—`.
 ## Files in this repo
 
 - `index.html` — the full app (HTML + CSS + JavaScript)
-- `seahorse.png` — logo used in the page header and as the favicon
+- `seahorse.png` — logo used in the page header
+- `manifest.webmanifest`, `icon-192.png`, `icon-512.png`, `icon-maskable-512.png`, `apple-touch-icon.png` — home-screen app setup and icons (square versions of the seahorse)
 - `README.md` — this file
 - `LICENSE` — MIT License
 
@@ -134,6 +135,7 @@ No build step. No backend. Just static hosting.
 1. Put these files in the repo root:
    - `index.html`
    - `seahorse.png`
+   - `manifest.webmanifest` and the `icon-*.png` / `apple-touch-icon.png` files
    - `README.md`
    - `LICENSE`
 
@@ -147,6 +149,16 @@ No build step. No backend. Just static hosting.
    - Save
 
 4. Wait a minute, then open your Pages URL.
+
+---
+
+## Add to Home Screen
+
+The page can be installed like an app, with the seahorse icon and no browser bars:
+- **iPhone (Safari):** Share button → **Add to Home Screen**
+- **Android (Chrome):** ⋮ menu → **Add to Home screen** / **Install app**
+
+There is deliberately no offline service worker, so the installed app always loads the latest version and live data.
 
 ---
 
