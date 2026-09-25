@@ -152,6 +152,12 @@ No build step. No backend. Just static hosting.
 
 ---
 
+## Search engines
+
+`index.html` has `<meta name="robots" content="noindex, nofollow">`, so Google and other search engines drop the page from results the next time they crawl it. Anyone with the link can still open it.
+
+---
+
 ## Add to Home Screen
 
 The page can be installed like an app, with the seahorse icon and no browser bars:
