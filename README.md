@@ -12,6 +12,7 @@ A lightweight, mobile-friendly tide + conditions viewer for Boston.
 - See **high/low tide event times**
 - See latest **water temperature (Boston and Portland ME coastal stations, plus offshore buoy)**, air temperature, and wind
 - See **NWS forecast** for the selected date (only when within the next ~7 days)
+- Links to **beach bacteria results**: the Mass DPH beach water quality dashboard (enterococcus sampling, daily Memorial Day–Labor Day) and Save the Harbor's annual beach report card
 
 Hosted via **GitHub Pages** (static HTML/JS, no backend).
 
