@@ -174,6 +174,10 @@
         <span class="pill" id="wxLine">—</span>
       </div>
       <div class="line">
+        <span class="k">Beach bacteria:</span>
+        <span class="pill"><a href="https://www.mass.gov/info-details/interactive-beach-water-quality-dashboard" target="_blank" rel="noopener">Mass DPH beach dashboard</a> (daily, Memorial Day–Labor Day) • <a href="https://www.savetheharbor.org/policy/water-quality" target="_blank" rel="noopener">Save the Harbor report card</a></span>
+      </div>
+      <div class="line">
         <span class="k">Tide events:</span>
         <span class="pill" id="tideEventsLine">—</span>
       </div>
@@ -185,7 +189,7 @@
 
     <div class="small" style="margin-top:10px;">
       Tide station: <span class="mono">8443970</span> (Boston, MA) • Datum <span class="mono">MLLW</span>.<br>
-      Primary water temp: Maine coastal <span class="mono">8418150</span> (Portland, ME). Offshore context: buoy <span class="mono">44013</span>.
+      Coastal water temp: Boston <span class="mono">8443970</span> and Portland, ME <span class="mono">8418150</span>. Offshore context: buoy <span class="mono">44013</span>.
     </div>
   </div>
 
@@ -263,8 +267,12 @@ const NOAA_COOPS = "https://api.tidesandcurrents.noaa.gov/api/prod/datagetter";
 const DATUM = "MLLW";
 const CURVE_INTERVAL_MIN = 6;
 
-// Maine coastal water temp via CO-OPS (Portland, ME)
-const COASTAL_TEMP_STATION = "8418150";
+// Coastal water temps via CO-OPS: Boston harbor, plus Portland ME
+// (in winter Portland has tracked beach temps better than offshore buoy 44013).
+const COASTAL_TEMP_STATIONS = [
+  { id: TIDE_STATION, name: "Boston" },
+  { id: "8418150",    name: "Portland ME" }
+];
 
 // Buoy via ERDDAP (CORS-friendly)
 const ERDDAP_BASE = "https://data.neracoos.org/erddap/tabledap/NDBC_44013.json";
@@ -288,6 +296,14 @@ function todayISO() {
   return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
 }
 function ymdCompact(isoDate){ return isoDate.replaceAll("-", ""); }
+// NOAA lst_ldt timestamps look like "2026-09-25 14:06". new Date() on that
+// string is non-standard (Safari has returned Invalid Date), so parse by hand.
+function parseNoaaLocal(s){
+  const [date, time = "00:00"] = s.trim().split(" ");
+  const [Y, M, D] = date.split("-").map(Number);
+  const [h, m] = time.split(":").map(Number);
+  return new Date(Y, M-1, D, h, m, 0, 0);
+}
 
 function ftToM(ft){ return ft * 0.3048; }
 function cToF(c){ return (c * 9/5) + 32; }
@@ -345,9 +361,9 @@ async function fetchDayCurveFeet(isoDate){
   const ymd = ymdCompact(isoDate);
   const data = await fetchJSON(`${NOAA_COOPS}?product=predictions&application=boston-irish-dippers&station=${TIDE_STATION}` +
     `&begin_date=${ymd}%2000:00&end_date=${ymd}%2023:59&datum=${DATUM}&time_zone=lst_ldt&units=english` +
-    `&interval=${6}&format=json`);
+    `&interval=${CURVE_INTERVAL_MIN}&format=json`);
   if(!data.predictions) throw new Error("No predictions returned (curve).");
-  return data.predictions.map(p => ({ t: new Date(p.t), vFt: Number(p.v) })).sort((a,b)=>a.t-b.t);
+  return data.predictions.map(p => ({ t: parseNoaaLocal(p.t), vFt: Number(p.v) })).sort((a,b)=>a.t-b.t);
 }
 async function fetchDayHiLoFeet(isoDate){
   const ymd = ymdCompact(isoDate);
@@ -355,7 +371,7 @@ async function fetchDayHiLoFeet(isoDate){
     `&begin_date=${ymd}%2000:00&end_date=${ymd}%2023:59&datum=${DATUM}&time_zone=lst_ldt&units=english` +
     `&interval=hilo&format=json`);
   if(!data.predictions) throw new Error("No predictions returned (hilo).");
-  return data.predictions.map(p => ({ t: new Date(p.t), vFt: Number(p.v), type: p.type })).sort((a,b)=>a.t-b.t);
+  return data.predictions.map(p => ({ t: parseNoaaLocal(p.t), vFt: Number(p.v), type: p.type })).sort((a,b)=>a.t-b.t);
 }
 function computeDayMaxHigh(){
   const highs = HILO.filter(x => x.type === "H" || x.type === "HH");
@@ -423,17 +439,18 @@ async function updateNDBCConditions(){
   el.textContent = "Loading…";
 
   try{
-    const [buoyJ, coastal] = await Promise.all([
+    const [buoyJ, ...coastal] = await Promise.all([
       fetchJSON(ERDDAP_LATEST).catch(()=>null),
-      fetchCOOPSLatestWaterTempF(COASTAL_TEMP_STATION).catch(()=>null)
+      ...COASTAL_TEMP_STATIONS.map(st => fetchCOOPSLatestWaterTempF(st.id).catch(()=>null))
     ]);
 
-    // Coastal line (primary)
-    let coastalLine = "Coastal water (Portland ME): —";
-    if(coastal?.tempF != null){
-      const f = coastal.tempF;
-      coastalLine = `Coastal water (Portland ME): ${f.toFixed(1)}°F (${fToC(f).toFixed(1)}°C)`;
-    }
+    // Coastal lines (one per CO-OPS station)
+    const coastalLines = COASTAL_TEMP_STATIONS.map((st, i) => {
+      const f = coastal[i]?.tempF;
+      return (f != null)
+        ? `Coastal water (${st.name}): ${f.toFixed(1)}°F (${fToC(f).toFixed(1)}°C)`
+        : `Coastal water (${st.name}): —`;
+    });
 
     // Buoy line (secondary)
     let buoyLine = "Offshore buoy (44013): —";
@@ -473,8 +490,8 @@ async function updateNDBCConditions(){
       buoyLine = `Offshore buoy (44013): ${parts.length ? parts.join(" • ") : "—"}`;
     }
 
-    // Two lines in the same pill:
-    el.textContent = `${coastalLine}\n${buoyLine}`;
+    // One line per source in the same pill:
+    el.textContent = [...coastalLines, buoyLine].join("\n");
   } catch(e){
     el.textContent = "—";
   }
@@ -505,7 +522,9 @@ async function getNWSData(){
   return NWS_CACHE;
 }
 
+let NWS_SEQ = 0;
 async function updateNWSForecast(selectedISO){
+  const seq = ++NWS_SEQ;
   const el = document.getElementById("wxLine");
   el.textContent = "Loading…";
 
@@ -517,6 +536,7 @@ async function updateNWSForecast(selectedISO){
 
   try{
     const { dailyPeriods, hourlyPeriods } = await getNWSData();
+    if(seq !== NWS_SEQ) return; // a newer date was picked while we waited
 
     if(selectedISO === todayISO()){
       const next = hourlyPeriods.slice(0, 12);
@@ -585,7 +605,7 @@ async function updateNWSForecast(selectedISO){
 
     el.textContent = parts.join(" | ");
   } catch(e){
-    el.textContent = "—";
+    if(seq === NWS_SEQ) el.textContent = "—";
   }
 }
 
@@ -638,7 +658,6 @@ function renderPlot(){
   });
 
   updateSelectedLine(cursor, cursorY);
-  installScrub();
 }
 
 function installScrub(){
@@ -804,6 +823,15 @@ function buildTable(isoDate){
 /* ---------------- Coastal Temps (added) ---------------- */
 /* labelOffsetPx nudges the label boxes to avoid overlap */
 const coastalStations = [
+  {
+    id:"8443970",
+    name:"Boston, MA",
+    short:"Boston",
+    lat:42.3539,
+    lon:-71.0503,
+    home:"https://tidesandcurrents.noaa.gov/stationhome.html?id=8443970",
+    labelOffsetPx: { x: 0, y: 0 }
+  },
   {
     id:"8418150",
     name:"Portland Harbor, ME",
@@ -1007,40 +1035,94 @@ document.getElementById("jump").addEventListener("click", () => {
   document.getElementById("tableSection").scrollIntoView({ behavior:"smooth", block:"start" });
 });
 
+function readTideCache(key){
+  try{
+    const cached = sessionStorage.getItem(key);
+    if(!cached) return null;
+    const obj = JSON.parse(cached);
+    const curve = obj.curve.map(p => ({ t:new Date(p.t), vFt:p.vFt }));
+    const hilo  = obj.hilo.map(p => ({ t:new Date(p.t), vFt:p.vFt, type:p.type }));
+    return curve.length ? { curve, hilo } : null;
+  } catch(_){
+    return null;
+  }
+}
+function writeTideCache(key, curve, hilo){
+  try{
+    sessionStorage.setItem(key, JSON.stringify({
+      curve: curve.map(p => ({ t:p.t.toISOString(), vFt:p.vFt })),
+      hilo:  hilo.map(p => ({ t:p.t.toISOString(), vFt:p.vFt, type:p.type }))
+    }));
+  } catch(_){}
+}
+
+function showTideError(msg){
+  CURVE = [];
+  HILO = [];
+  DAY_MAX_HIGH_FT = null;
+  DAY_MAX_HIGH_TIME = null;
+  Plotly.purge(document.getElementById("plot"));
+  document.getElementById("hoverBox").style.display = "none";
+  document.getElementById("tideEventsLine").textContent = "—";
+  document.getElementById("selectedLine").textContent = msg;
+  document.getElementById("tideTableBody").innerHTML = "";
+  document.getElementById("tableStatus").textContent = msg;
+  document.getElementById("tableCount").textContent = "0 rows";
+}
+
+// Incremented on every loadDate call; a response is applied only if it
+// belongs to the most recent request, so fast date changes can't mix days.
+let LOAD_SEQ = 0;
+
 async function loadDate(isoDate){
+  const seq = ++LOAD_SEQ;
+
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(isoDate || "")){
+    showTideError("Pick a date.");
+    document.getElementById("wxLine").textContent = "—";
+    return;
+  }
+
   // conditions + forecast
   updateNDBCConditions().catch(()=>{ document.getElementById("condLine").textContent="—"; });
   updateNWSForecast(isoDate).catch(()=>{ document.getElementById("wxLine").textContent="—"; });
 
-  // tides cache
-  const cacheKey = `bid_${isoDate}_coops8443970_curve+hilo_v7`;
-  const cached = sessionStorage.getItem(cacheKey);
+  document.getElementById("tableStatus").textContent = "Loading tides…";
 
-  if(cached){
-    const obj = JSON.parse(cached);
-    CURVE = obj.curve.map(p => ({ t:new Date(p.t), vFt:p.vFt }));
-    HILO  = obj.hilo.map(p => ({ t:new Date(p.t), vFt:p.vFt, type:p.type }));
-  } else {
-    const [curve, hilo] = await Promise.all([fetchDayCurveFeet(isoDate), fetchDayHiLoFeet(isoDate)]);
-    CURVE = curve;
-    HILO = hilo;
-    sessionStorage.setItem(cacheKey, JSON.stringify({
-      curve: CURVE.map(p => ({ t:p.t.toISOString(), vFt:p.vFt })),
-      hilo:  HILO.map(p => ({ t:p.t.toISOString(), vFt:p.vFt, type:p.type }))
-    }));
+  // tides cache
+  const cacheKey = `bid_${isoDate}_coops8443970_curve+hilo_v8`;
+  let data = readTideCache(cacheKey);
+
+  if(!data){
+    try{
+      const [curve, hilo] = await Promise.all([fetchDayCurveFeet(isoDate), fetchDayHiLoFeet(isoDate)]);
+      if(!curve.length) throw new Error("NOAA returned no tide predictions.");
+      data = { curve, hilo };
+      writeTideCache(cacheKey, curve, hilo);
+    } catch(e){
+      if(seq !== LOAD_SEQ) return;
+      showTideError(`Could not load tides from NOAA (${e.message}). Try again shortly.`);
+      return;
+    }
   }
 
+  if(seq !== LOAD_SEQ) return; // a newer date was picked while we waited
+
+  CURVE = data.curve;
+  HILO = data.hilo;
   computeDayMaxHigh();
   updateTideEventsLine();
   renderPlot();
   buildTable(isoDate);
-
-  // Coastal temps at page bottom
-  loadCoastalTemps().catch(() => {
-    const upd = document.getElementById("coastalLastUpdated");
-    if(upd) upd.textContent = "Failed to load coastal temps.";
-  });
 }
+
+installScrub();
+
+// Coastal temps don't depend on the selected date; load once.
+loadCoastalTemps().catch(() => {
+  const upd = document.getElementById("coastalLastUpdated");
+  if(upd) upd.textContent = "Failed to load coastal temps.";
+});
 
 const dateEl = document.getElementById("date");
 dateEl.value = todayISO();
