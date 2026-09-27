@@ -156,6 +156,8 @@
       .cal .day .mon { display:none; }
       .calWrap { padding:8px; }
     }
+    #thermoSection .btnLink { display:inline-block; padding:9px 14px; border-radius:10px; background:#111; color:#fff; text-decoration:none; font-size:14px; }
+    #thermoTable td.num { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
     #sundayTable td.num { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
     #sundayTable tbody tr { cursor:pointer; }
     #sundayTable tbody tr:hover { background:#fafafa; }
@@ -304,6 +306,32 @@
     </div>
   </div>
 
+  <div class="card" id="thermoSection" hidden>
+    <div class="row" style="justify-content: space-between; align-items: center;">
+      <div>
+        <div class="secTitle">Shore thermometer log</div>
+        <div class="small">Water temperatures measured at the beach by club members. Latest first.</div>
+      </div>
+      <a class="btnLink" id="thermoFormLink" href="#" target="_blank" rel="noopener">+ Log a reading</a>
+    </div>
+    <div class="small" id="thermoStatus" style="margin-top:8px;">Loading…</div>
+    <div style="height:10px;"></div>
+    <div class="tableWrap">
+      <table id="thermoTable">
+        <thead>
+          <tr>
+            <th>When</th>
+            <th>Beach</th>
+            <th>Water</th>
+            <th>By</th>
+            <th>Notes</th>
+          </tr>
+        </thead>
+        <tbody id="thermoBody"></tbody>
+      </table>
+    </div>
+  </div>
+
   <div class="card" id="tableSection">
     <div class="row" style="justify-content: space-between;">
       <div>
@@ -384,6 +412,14 @@ const CASTLE_ISLAND_STATION = "8444069";
 const GALLOPS_LATEST =
   "https://data.neracoos.org/erddap/tabledap/SLL-2699.json" +
   "?time,water_temperature&time%3E=now-1day&water_temperature!=NaN&orderByMax(%22time%22)";
+
+// Shore thermometer log: a Google Form whose responses sheet is published to
+// the web as CSV (File → Share → Publish to web → CSV). Leave both empty to
+// hide the feature. See README "Shore thermometer log".
+const THERMO_FORM_URL = "";   // e.g. https://forms.gle/...
+const THERMO_CSV_URL  = "";   // e.g. https://docs.google.com/spreadsheets/d/e/.../pub?output=csv
+const THERMO_LOG_ROWS = 10;           // rows shown in the log table
+const THERMO_CONDITIONS_MAX_DAYS = 7; // show in Conditions only if this recent
 
 // Buoy via ERDDAP (CORS-friendly)
 const ERDDAP_BASE = "https://data.neracoos.org/erddap/tabledap/NDBC_44013.json";
@@ -634,11 +670,12 @@ async function updateNDBCConditions(){
   el.textContent = "Loading…";
 
   try{
-    const [buoyJ, castle, gallopsF, sst, ...coastal] = await Promise.all([
+    const [buoyJ, castle, gallopsF, sst, shore, ...coastal] = await Promise.all([
       fetchJSON(ERDDAP_LATEST).catch(()=>null),
       fetchCastleIsland().catch(()=>null),
       fetchGallopsWaterF().catch(()=>null),
       fetchSatelliteSst().catch(()=>null),
+      latestShoreReading().catch(()=>null),
       ...COASTAL_TEMP_STATIONS.map(st => fetchCOOPSLatestWaterTempF(st.id).catch(()=>null))
     ]);
 
@@ -715,10 +752,126 @@ async function updateNDBCConditions(){
     }
 
     // One line per source in the same pill:
-    el.textContent = [castleLine, ...harborLines, ...coastalLines, buoyLine].join("\n");
+    // Shore thermometer (club members' own reading) goes first when recent
+    const shoreLines = shore
+      ? [`Shore thermometer (${shore.beach ? shore.beach + ", " : ""}${fmtReadingWhen(shore.t)}): ` +
+         `${shore.f.toFixed(1)}°F (${fToC(shore.f).toFixed(1)}°C)`]
+      : [];
+
+    el.textContent = [...shoreLines, castleLine, ...harborLines, ...coastalLines, buoyLine].join("\n");
   } catch(e){
     el.textContent = "—";
   }
+}
+
+/* ---------------- SHORE THERMOMETER LOG (Google Form → published CSV) ---------------- */
+// Minimal RFC 4180 CSV parser (quoted fields, "" escapes, CRLF).
+function parseCSV(text){
+  const rows = []; let row = [], field = "", q = false;
+  for(let i = 0; i < text.length; i++){
+    const c = text[i];
+    if(q){
+      if(c === '"'){ if(text[i+1] === '"'){ field += '"'; i++; } else q = false; }
+      else field += c;
+    } else if(c === '"') q = true;
+    else if(c === ","){ row.push(field); field = ""; }
+    else if(c === "\n" || c === "\r"){
+      if(c === "\r" && text[i+1] === "\n") i++;
+      row.push(field); field = "";
+      if(row.some(x => x.trim() !== "")) rows.push(row);
+      row = [];
+    } else field += c;
+  }
+  row.push(field);
+  if(row.some(x => x.trim() !== "")) rows.push(row);
+  return rows;
+}
+
+// Google Sheets timestamps: "9/28/2026 10:15:32" (US) or "2026-09-28 10:15:32".
+function parseSheetTimestamp(s){
+  s = String(s || "").trim();
+  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})[ T](\d{1,2}):(\d{2})/);
+  if(m) return new Date(+m[1], +m[2]-1, +m[3], +m[4], +m[5]);
+  m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})/);
+  if(m) return new Date(+m[3], +m[1]-1, +m[2], +m[4], +m[5]);
+  return null;
+}
+
+let THERMO_PROMISE = null;
+function loadThermoReadings(){
+  if(!THERMO_CSV_URL) return Promise.resolve(null);
+  if(!THERMO_PROMISE){
+    THERMO_PROMISE = (async () => {
+      const r = await fetch(THERMO_CSV_URL, { cache:"no-store" });
+      if(!r.ok) throw new Error(`HTTP ${r.status}`);
+      const rows = parseCSV(await r.text());
+      if(rows.length < 1) return [];
+      // Match columns by the form's question titles, so wording can vary.
+      const head = rows[0].map(h => h.toLowerCase());
+      const col = (re) => head.findIndex(h => re.test(h));
+      const iTime = col(/timestamp/), iTemp = col(/temp/), iBeach = col(/beach|location|where/),
+            iName = col(/name|who|by/), iNote = col(/note|comment/);
+      const out = [];
+      for(const r of rows.slice(1)){
+        const t = parseSheetTimestamp(r[iTime]);
+        const f = parseFloat(String(r[iTemp] ?? "").replace(",", "."));
+        if(!t || Number.isNaN(f) || f < 25 || f > 95) continue;   // skip blanks / typos
+        out.push({ t, f,
+          beach: (iBeach >= 0 ? r[iBeach] : "").trim(),
+          name:  (iName  >= 0 ? r[iName]  : "").trim(),
+          note:  (iNote  >= 0 ? r[iNote]  : "").trim() });
+      }
+      out.sort((a, b) => b.t - a.t);
+      return out;
+    })();
+  }
+  return THERMO_PROMISE;
+}
+
+function fmtReadingWhen(d){ return `${WEEKDAY[d.getDay()]} ${d.getDate()} ${MONTH[d.getMonth()]} ${fmtHM(d)}`; }
+
+async function renderThermoLog(){
+  const sec = document.getElementById("thermoSection");
+  if(!THERMO_CSV_URL) return;              // not set up: keep hidden
+  sec.hidden = false;
+  const link = document.getElementById("thermoFormLink");
+  if(THERMO_FORM_URL) link.href = THERMO_FORM_URL; else link.hidden = true;
+  const status = document.getElementById("thermoStatus");
+  const body = document.getElementById("thermoBody");
+  body.textContent = "";
+  try{
+    const readings = await loadThermoReadings();
+    if(!readings.length){ status.textContent = "No readings yet. Be the first to log one."; return; }
+    const last = readings[0];
+    const days = Math.floor((Date.now() - last.t.getTime()) / 86400000);
+    status.textContent = `${readings.length} reading${readings.length === 1 ? "" : "s"}. ` +
+      (days <= 0 ? "Latest today." : `Latest ${days} day${days === 1 ? "" : "s"} ago.`);
+    for(const x of readings.slice(0, THERMO_LOG_ROWS)){
+      const tr = document.createElement("tr");
+      for(const [txt, cls] of [
+        [fmtReadingWhen(x.t), "num"], [x.beach || "—", ""],
+        [`${x.f.toFixed(1)}°F (${fToC(x.f).toFixed(1)}°C)`, "num"],
+        [x.name || "—", ""], [x.note || "", ""]
+      ]){
+        const td = document.createElement("td");
+        if(cls) td.className = cls;
+        td.textContent = txt;           // sheet content is untrusted
+        tr.appendChild(td);
+      }
+      body.appendChild(tr);
+    }
+  } catch(e){
+    status.textContent = `Could not load the thermometer log (${e.message}).`;
+  }
+}
+
+// Latest shore reading for the Conditions box, only if recent enough.
+async function latestShoreReading(){
+  const readings = await loadThermoReadings();
+  const x = readings?.[0];
+  if(!x) return null;
+  if(Date.now() - x.t.getTime() > THERMO_CONDITIONS_MAX_DAYS*86400000) return null;
+  return x;
 }
 
 /* ---------------- FORECAST (NWS) ---------------- */
@@ -1658,6 +1811,9 @@ installScrub();
 
 // Tide calendar + Sundays: independent of the selected date; load once.
 loadCalendar();
+
+// Shore thermometer log (hidden until THERMO_CSV_URL is set)
+renderThermoLog();
 
 // Rain-based beach warning is "now", not tied to the selected date.
 updateBeachLine();

@@ -163,6 +163,24 @@ No build step. No backend. Just static hosting.
 
 ---
 
+## Shore thermometer log (Google Form)
+
+Club members log water temperatures measured at the beach. The latest reading from the last 7 days is shown first in Conditions, and the last 10 are listed in the **Shore thermometer log** section. The section stays hidden until it's set up.
+
+**Setup (one time):**
+1. Create a Google Form with these questions:
+   - **Water temperature (°F)**: short answer, required. Under ⋮ → Response validation, choose Number, between 28 and 90.
+   - **Beach**: dropdown, required. For example: L Street, M Street, City Point, Pleasure Bay / Castle Island, Carson, Tenean, Malibu, Savin Hill, Wollaston, Other.
+   - **Your name (optional)**: short answer. First name or initials are enough; it will be visible on the page.
+   - **Notes (optional)**: short answer.
+2. In the form, go to **Responses → Link to Sheets** to create the responses sheet.
+3. In the sheet, choose **File → Share → Publish to web**, pick the responses tab, choose **Comma-separated values (.csv)**, then click **Publish**. Copy the link.
+4. In `index.html`, set `THERMO_FORM_URL` to the form's share link and `THERMO_CSV_URL` to the published CSV link.
+
+Columns are matched by the question wording ("temp", "beach", "name", "note"), so small wording changes are fine. Readings outside 25–95°F are ignored as typos. The published CSV can be opened by anyone who has its link, so don't collect anything private.
+
+---
+
 ## Search engines
 
 `index.html` has `<meta name="robots" content="noindex, nofollow">`, so Google and other search engines drop the page from results the next time they crawl it. Anyone with the link can still open it.
