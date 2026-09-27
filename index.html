@@ -130,7 +130,13 @@
     .seg button { border:0; border-radius:0; padding:8px 12px; background:#fff; cursor:pointer; font-size:13px; }
     .seg button[aria-pressed="true"] { background:#111; color:#fff; }
     .calWrap { background:#fff; border:1px solid var(--line); border-radius:12px; padding:10px; margin-top:10px; overflow-x:auto; }
-    .cal { display:grid; grid-template-columns: 78px repeat(18, minmax(13px, 1fr)); gap:2px; min-width:330px; }
+    .cal { display:grid; grid-template-columns: 78px repeat(18, minmax(13px, 1fr)) 40px; gap:2px; min-width:360px; }
+    .cal .rangeCell { position:relative; height:16px; cursor:pointer; margin-left:4px; }
+    .cal .rangeCell .bar { position:absolute; left:0; top:4px; height:8px; border-radius:2px; background:#9ec5f4; }
+    .cal .rangeCell.spring .bar { background:#1c5cab; }
+    .cal .rangeCell.neap .bar { background:#cde2fb; }
+    .cal .rangeCell .tag { position:absolute; right:0; top:0; font-size:10px; font-weight:750; line-height:16px; color: var(--fg); }
+    .cal .day .phase { margin-left:2px; font-size:10px; }
     .cal .hh { font-size:10px; color: var(--muted); text-align:center; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; line-height:14px; }
     .cal .hh.meet { color: var(--fg); font-weight:750; }
     .cal .day { all:unset; cursor:pointer; font-size:11px; color: var(--muted); white-space:nowrap; line-height:16px; padding-right:4px; border-radius:4px; }
@@ -153,7 +159,8 @@
     #calTip { position:fixed; z-index:9999; display:none; pointer-events:none; padding:7px 10px; border-radius:10px; background:rgba(255,255,255,0.97); border:1px solid rgba(0,0,0,0.18); box-shadow:0 8px 22px rgba(0,0,0,0.14); font-size:13px; line-height:1.3; }
     #calTip .m { color: var(--muted); }
     @media (max-width: 600px){
-      .cal { grid-template-columns: 50px repeat(18, minmax(12px, 1fr)); min-width:0; }
+      .cal { grid-template-columns: 50px repeat(18, minmax(11px, 1fr)) 30px; min-width:0; }
+      .cal .rangeCell { margin-left:2px; }
       .cal .day .mon { display:none; }
       .calWrap { padding:8px; }
     }
@@ -282,6 +289,10 @@
       </div>
       <span class="key"><span class="swMeet"></span>Sunday 10:00 meet</span>
       <span class="key"><span class="swNow"></span>Now</span>
+    </div>
+    <div class="small" style="margin-top:6px;">
+      Range: the bar shows each day's tide range. <b>S</b> = spring tides (biggest range of the cycle), <b>N</b> = neap tides (smallest).
+      🌑 🌓 🌕 🌗 next to a day = new moon, first quarter, full moon, last quarter. Spring tides usually come a day or two after new and full moon.
     </div>
   </div>
   <div id="calTip" role="tooltip"></div>
@@ -2370,6 +2381,38 @@ function pinOnScreen(el, ms = 6000){
   raf = requestAnimationFrame(tick);
 }
 
+// Daily tide range (highest high - lowest low) and spring/neap days.
+// Spring = the biggest range within +/-3 days, neap = the smallest; this uses
+// Boston's actual predictions, so it includes the 1-2 day lag after new/full moon.
+function dayRangeFt(dayDate){
+  const evs = dayHilo(dayDate);
+  const hi = evs.filter(x => x.type === "H" || x.type === "HH").map(x => x.vFt);
+  const lo = evs.filter(x => x.type === "L" || x.type === "LL").map(x => x.vFt);
+  return (hi.length && lo.length) ? Math.max(...hi) - Math.min(...lo) : null;
+}
+function springNeapFlags(days){
+  const r = days.map(dayRangeFt), out = days.map(() => "");
+  for(let i = 0; i < days.length; i++){
+    if(r[i] == null) continue;
+    const lo = Math.max(0, i - 3), hi = Math.min(days.length - 1, i + 3);
+    if(i - lo < 2 || hi - i < 2) continue;              // need neighbours on both sides
+    const win = r.slice(lo, hi + 1).filter(v => v != null);
+    if(r[i] === Math.max(...win)) out[i] = "spring";
+    else if(r[i] === Math.min(...win)) out[i] = "neap";
+  }
+  return { ranges: r, flags: out };
+}
+function principalPhaseEmoji(dayDate){
+  // new / quarter / full moon if it happens during this calendar day
+  const a = moonPhase(new Date(dayDate.getFullYear(), dayDate.getMonth(), dayDate.getDate(), 0)).phase;
+  const b = moonPhase(new Date(dayDate.getFullYear(), dayDate.getMonth(), dayDate.getDate(), 23, 59)).phase;
+  const marks = [[0, "🌑"], [0.25, "🌓"], [0.5, "🌕"], [0.75, "🌗"], [1, "🌑"]];
+  for(const [x, e] of marks){
+    if(b >= a ? (a <= x && x <= b) : (x >= a || x <= b)) return e;   // wrap at new moon
+  }
+  return "";
+}
+
 function openDay(dayDate, anchorEl, hour){
   const iso = isoOf(dayDate);
   const el = document.getElementById("date");
@@ -2398,14 +2441,24 @@ function renderCalendar(){
     d.textContent = (h % 2 === 0 || h === MEET_HOUR) ? pad2(h) : "";
     frag.appendChild(d);
   }
+  const rh = document.createElement("div");
+  rh.className = "hh"; rh.textContent = "Range";
+  frag.appendChild(rh);
 
-  for(const day of CAL.days.slice(0, CAL_DAYS_SHOWN)){
+  const shown = CAL.days.slice(0, CAL_DAYS_SHOWN);
+  const sn = springNeapFlags(CAL.days);            // flags use all fetched days
+  const rVals = sn.ranges.filter(v => v != null);
+  const rMin = rVals.length ? Math.min(...rVals) : 0, rMax = rVals.length ? Math.max(...rVals) : 1;
+
+  for(const day of shown){
     const isSun = day.getDay() === MEET_WEEKDAY;
     const isToday = isoOf(day) === isoOf(now);
     const lab = document.createElement("button");
     lab.type = "button";
     lab.className = "day" + (isSun ? " sun" : "") + (isToday ? " today" : "");
     if(isToday) lab.textContent = "Today"; else fillDayLabel(lab, day);
+    const pe = principalPhaseEmoji(day);
+    if(pe){ const sp = document.createElement("span"); sp.className = "phase"; sp.textContent = pe; lab.appendChild(sp); }
     lab.title = `Open ${fmtDayLabel(day)}`;
     lab.addEventListener("click", () => openDay(day, lab));
     frag.appendChild(lab);
@@ -2424,6 +2477,22 @@ function renderCalendar(){
       c.dataset.day = isoOf(day); c.dataset.h = h;
       frag.appendChild(c);
     }
+    // Range column: bar length = day's tide range; S / N on spring / neap days
+    const di = CAL.days.findIndex(x => isoOf(x) === isoOf(day));
+    const rng = sn.ranges[di], flag = sn.flags[di];
+    const rc = document.createElement("div");
+    rc.className = "rangeCell" + (flag ? " " + flag : "");
+    rc.dataset.day = isoOf(day);
+    if(rng != null){
+      const bar = document.createElement("div");
+      bar.className = "bar";
+      const f = rMax > rMin ? (rng - rMin) / (rMax - rMin) : 1;
+      bar.style.width = `calc((100% - 11px) * ${(0.35 + 0.65 * f).toFixed(3)})`;   // leaves room for S/N
+      rc.appendChild(bar);
+      if(flag){ const tg = document.createElement("span"); tg.className = "tag"; tg.textContent = flag === "spring" ? "S" : "N"; rc.appendChild(tg); }
+      rc.title = `Tide range ${rng.toFixed(1)} ft` + (flag ? ` · ${flag} tides` : "");
+    }
+    frag.appendChild(rc);
   }
   grid.appendChild(frag);
 
@@ -2433,7 +2502,33 @@ function renderCalendar(){
     const day = new Date(Y, M-1, D);
     return { day, h: Number(el.dataset.h) };
   };
+  const placeTip = (e) => {
+    tip.style.display = "block";
+    const r = tip.getBoundingClientRect();
+    let left = e.clientX + 14, top = e.clientY - r.height - 12;
+    if(left + r.width + 8 > window.innerWidth) left = e.clientX - r.width - 14;
+    if(top < 8) top = e.clientY + 16;
+    tip.style.left = `${Math.max(8, left)}px`;
+    tip.style.top = `${top}px`;
+  };
   const showTip = (e) => {
+    const rcEl = e.target.closest(".rangeCell");
+    if(rcEl && rcEl.title){
+      const [Y, M, D] = rcEl.dataset.day.split("-").map(Number);
+      tip.textContent = "";
+      const a = document.createElement("div");
+      a.style.fontWeight = "750";
+      a.textContent = fmtDayLabel(new Date(Y, M-1, D));
+      const b = document.createElement("div");
+      b.textContent = rcEl.title;
+      const c = document.createElement("div");
+      c.className = "m";
+      c.textContent = rcEl.classList.contains("spring") ? "Biggest tides of this cycle (moon and sun lined up)"
+                    : rcEl.classList.contains("neap") ? "Smallest tides of this cycle (moon at a right angle to the sun)" : "";
+      tip.append(a, b, c);
+      placeTip(e);
+      return;
+    }
     const el = e.target.closest(".cell");
     if(!el){ tip.style.display = "none"; return; }
     const { day, h } = cellInfo(el);
@@ -2463,6 +2558,7 @@ function renderCalendar(){
   grid.onpointermove = (e) => { if(e.pointerType === "mouse") showTip(e); };
   grid.onpointerleave = (e) => { if(e.pointerType === "mouse") tip.style.display = "none"; };
   grid.onclick = (e) => {
+    if(e.target.closest(".rangeCell")){ showTip(e); return; }
     const el = e.target.closest(".cell");
     if(!el) return;
     showTip(e);

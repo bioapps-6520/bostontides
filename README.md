@@ -14,6 +14,7 @@ A lightweight, mobile-friendly tide + conditions viewer for Boston.
   - height in **feet** and **meters**
 - See **high/low tide event times**
 - See a **water temperature trend** chart (1 week, 2 weeks, 5 weeks, 3 months, 1 year): satellite at L Street (NASA MUR and NOAA blended), buoys 44013 and A01, and Portland ME as daily averages, with a table of latest value, change over the range and low–high (tap a row to hide or show a line); club thermometer readings appear as dots once the Google Form is set up
+- The tide calendar has a **Range** column: a bar for each day's tide range (highest high minus lowest low) with **S** on spring-tide days (biggest range within ±3 days) and **N** on neap days (smallest), based on Boston's own predictions, so it includes the 1–2 day lag after new/full moon; 🌑 🌓 🌕 🌗 mark new moon, quarters and full moon next to the day name
 - See a **tide calendar heatmap** (days × hours, 05:00–22:00, 2 weeks by default or 5 weeks) with Sunday 10:00 meets outlined and a "now" marker; color by **% of day max high** (default; each day's highest high tide = 100%) or by **height**, and the tooltip shows both, plus a **Sunday 10:00 meets** table for the next 8 Sundays (tide at 10:00, rising/falling, % of day max high, high/low times). Tap a day in either to open it in the main plot.
 - See latest **wind and air temperature at Castle Island**, **water temperature** (Portland ME coastal station, Gallops Island once it reports, plus offshore buoy)
 - See **NWS forecast** for the selected date (only when within the next ~7 days)
