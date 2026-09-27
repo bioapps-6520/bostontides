@@ -362,7 +362,7 @@
     <div class="row" style="justify-content: space-between; align-items: baseline;">
       <div>
         <h2>Coastal Water Temperature (NOAA stations)</h2>
-        <div class="sub">Live water temperatures from stations that publish <span class="mono">water_temperature</span> via NOAA CO-OPS. Click a row or label to open the station page.</div>
+        <div class="sub">Latest water temperatures: satellite estimate at L Street, offshore buoy 44013, and NOAA CO-OPS coastal stations. Click a row or label to open the station page.</div>
       </div>
       <div class="small"><span class="pillLite" id="coastalLastUpdated">Loading…</span></div>
     </div>
@@ -1497,6 +1497,16 @@ function buildTable(isoDate){
 /* labelOffsetPx nudges the label boxes to avoid overlap */
 const coastalStations = [
   {
+    id:"NOAA blended SST (satellite, 1–2 days old)",
+    name:"Satellite estimate at L Street",
+    short:"Satellite (L St)",
+    lat:42.325,
+    lon:-71.025,
+    home:"https://coastwatch.noaa.gov/erddap/griddap/noaacwBLENDEDsstDaily.html",
+    source:"satellite",   // data/sst.json, written daily by a GitHub Action
+    labelOffsetPx: { x: -80, y: -46 }   /* above Boston, clear of the buoy and Portland labels */
+  },
+  {
     id:"44013",
     name:"Offshore buoy, 16 NM E of Boston",
     short:"Buoy 44013",
@@ -1522,7 +1532,7 @@ const coastalStations = [
     lat:44.3917,
     lon:-68.2050,
     home:"https://tidesandcurrents.noaa.gov/stationhome.html?id=8413320",
-    labelOffsetPx: { x: 0, y: 0 }
+    labelOffsetPx: { x: -40, y: 0 }   /* keep inside the map's right edge on phones */
   },
   {
     id:"8447930",
@@ -1541,7 +1551,7 @@ const coastalStations = [
     lon:-70.09819,
     home:"https://tidesandcurrents.noaa.gov/stationhome.html?id=8449130",
     /* push Nantucket label slightly right+down to avoid Woods Hole overlap */
-    labelOffsetPx: { x: 52, y: 18 }
+    labelOffsetPx: { x: 52, y: 28 }
   }
 ];
 
@@ -1647,6 +1657,16 @@ async function loadCoastalTemps(){
   const rows = [];
   for(const st of coastalStations){
     const data = { waterF:null, airF:null, asOf:null }; // asOf: Date
+
+    if(st.source === "satellite"){
+      try{
+        const sst = await fetchSatelliteSst();
+        if(sst){ data.waterF = sst.tempF; data.asOf = sst.time; }
+      } catch(_) {}
+      rows.push({ st, data });
+      upsertMarker(st, data.waterF);
+      continue;
+    }
 
     if(st.source === "ndbc"){
       try{
