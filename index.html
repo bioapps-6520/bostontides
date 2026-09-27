@@ -1596,12 +1596,50 @@ function pctOfDayMax(dayDate, hour){
   return Math.max(0, Math.min(100, 100 * v / m));
 }
 
-function openDay(dayDate){
+// Keep an element at the same place on screen for a while. Loading a day changes
+// the height of content above (forecast, tide events, table), and Safari has no
+// scroll anchoring, so the page would visibly shift. Stops as soon as the reader
+// scrolls, taps or clicks again, or presses a key.
+let PIN_STOP = null;
+function pinOnScreen(el, ms = 6000){
+  if(PIN_STOP) PIN_STOP();
+  if(!el || !el.isConnected) return;
+  const top0 = el.getBoundingClientRect().top;
+  const t0 = performance.now();
+  let raf = 0, stopped = false;
+  const stop = () => {
+    if(stopped) return;
+    stopped = true; cancelAnimationFrame(raf);
+    window.removeEventListener("touchmove", stop);
+    window.removeEventListener("wheel", stop);
+    window.removeEventListener("keydown", stop);
+    window.removeEventListener("pointerdown", stop, true);
+    PIN_STOP = null;
+  };
+  const tick = () => {
+    if(stopped) return;
+    if(!el.isConnected || performance.now() - t0 > ms){ stop(); return; }
+    const d = el.getBoundingClientRect().top - top0;
+    if(Math.abs(d) >= 1) window.scrollBy(0, d);
+    raf = requestAnimationFrame(tick);
+  };
+  window.addEventListener("touchmove", stop, { passive:true });
+  window.addEventListener("wheel", stop, { passive:true });
+  window.addEventListener("keydown", stop);
+  // Any new tap/click (e.g. "Jump to table") also releases the pin. Added on the
+  // next frame so the tap that started this pin doesn't cancel it.
+  requestAnimationFrame(() => { if(!stopped) window.addEventListener("pointerdown", stop, true); });
+  PIN_STOP = stop;
+  raf = requestAnimationFrame(tick);
+}
+
+function openDay(dayDate, anchorEl){
   const iso = isoOf(dayDate);
   const el = document.getElementById("date");
   el.value = iso;
+  // No auto-scroll to the plot: keep the tapped item where it is on screen.
+  pinOnScreen(anchorEl);
   loadDate(iso);
-  // No auto-scroll: the page stays where the reader is (the plot above updates).
 }
 
 function renderCalendar(){
@@ -1631,7 +1669,7 @@ function renderCalendar(){
     lab.className = "day" + (isSun ? " sun" : "") + (isToday ? " today" : "");
     if(isToday) lab.textContent = "Today"; else fillDayLabel(lab, day);
     lab.title = `Open ${fmtDayLabel(day)}`;
-    lab.addEventListener("click", () => openDay(day));
+    lab.addEventListener("click", () => openDay(day, lab));
     frag.appendChild(lab);
 
     for(let h = CAL_FIRST_H; h <= CAL_LAST_H; h++){
@@ -1690,7 +1728,7 @@ function renderCalendar(){
     const el = e.target.closest(".cell");
     if(!el) return;
     showTip(e);
-    openDay(cellInfo(el).day);
+    openDay(cellInfo(el).day, el);
   };
 
   // Legend
@@ -1751,7 +1789,7 @@ function renderSundays(){
       tr.appendChild(td);
     }
     tr.title = `Open ${fmtDayLabel(d)}`;
-    tr.addEventListener("click", () => openDay(d));
+    tr.addEventListener("click", () => openDay(d, tr));
     body.appendChild(tr);
   }
 }
