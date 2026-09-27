@@ -285,7 +285,7 @@
     <div class="row" style="justify-content: space-between; align-items: center;">
       <div>
         <div class="secTitle">Tide calendar</div>
-        <div class="small">Hourly tide, 05:00 → 22:00. Darker = higher water. Tap a day to open it above.</div>
+        <div class="small">Hourly tide, 05:00 → 22:00. Darker = higher water. Tap a day to load it in the plot above.</div>
       </div>
       <div class="row" style="gap:8px;">
         <div class="seg" role="group" aria-label="Color by">
@@ -316,7 +316,7 @@
 
   <div class="card" id="sundaySection">
     <div class="secTitle">Sunday 10:00 meets</div>
-    <div class="small">Next 8 Sundays. Tap a row to open that day above.</div>
+    <div class="small">Next 8 Sundays. Tap a row to load that day in the plot above.</div>
     <div style="height:10px;"></div>
     <div class="tableWrap">
       <table id="sundayTable">
@@ -1601,7 +1601,7 @@ function openDay(dayDate){
   const el = document.getElementById("date");
   el.value = iso;
   loadDate(iso);
-  document.querySelector(".plotWrap").scrollIntoView({ behavior:"smooth", block:"center" });
+  // No auto-scroll: the page stays where the reader is (the plot above updates).
 }
 
 function renderCalendar(){
@@ -1657,7 +1657,7 @@ function renderCalendar(){
     const day = new Date(Y, M-1, D);
     return { day, h: Number(el.dataset.h) };
   };
-  grid.onpointermove = (e) => {
+  const showTip = (e) => {
     const el = e.target.closest(".cell");
     if(!el){ tip.style.display = "none"; return; }
     const { day, h } = cellInfo(el);
@@ -1683,10 +1683,14 @@ function renderCalendar(){
     tip.style.left = `${Math.max(8, left)}px`;
     tip.style.top = `${top}px`;
   };
-  grid.onpointerleave = () => { tip.style.display = "none"; };
+  // Mouse: follow the pointer. Touch: a tap shows the details (no hover on phones).
+  grid.onpointermove = (e) => { if(e.pointerType === "mouse") showTip(e); };
+  grid.onpointerleave = (e) => { if(e.pointerType === "mouse") tip.style.display = "none"; };
   grid.onclick = (e) => {
     const el = e.target.closest(".cell");
-    if(el) openDay(cellInfo(el).day);
+    if(!el) return;
+    showTip(e);
+    openDay(cellInfo(el).day);
   };
 
   // Legend
@@ -1766,6 +1770,17 @@ async function loadCalendar(){
     status.textContent = `Could not load the tide calendar from NOAA (${e.message}).`;
   }
 }
+
+// Hide the calendar tooltip on a tap outside the grid
+document.addEventListener("pointerdown", (e) => {
+  if(!e.target.closest("#cal")) document.getElementById("calTip").style.display = "none";
+});
+// Hide it when the reader scrolls (finger or wheel). Not on "scroll" itself:
+// loading a day changes content height above, and the browser's scroll
+// anchoring fires scroll events that would hide the tooltip right away.
+const hideCalTip = () => { document.getElementById("calTip").style.display = "none"; };
+window.addEventListener("touchmove", hideCalTip, { passive:true });
+window.addEventListener("wheel", hideCalTip, { passive:true });
 
 document.querySelectorAll("#calendarSection .seg button[data-days]").forEach(btn => {
   btn.addEventListener("click", () => {
