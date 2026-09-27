@@ -1141,7 +1141,7 @@ const TREND_COLORS = {
   portland:        "#e87ba4"    // 5 magenta
 };
 let TREND = null;          // { series:[{key,name,color,pts:[{d:Date,f:°F}]}], thermo:[...] }
-let TREND_DAYS = 35;
+let TREND_DAYS = 365;   // default view: 1 year
 const TREND_HIDDEN = new Set();   // names of lines the reader switched off
 
 function trendRangeStart(days){
