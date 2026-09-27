@@ -289,6 +289,14 @@
     </div>
     <div class="kv">
       <div class="line">
+        <span class="k">Sun:</span>
+        <span class="pill" id="sunLine">—</span>
+      </div>
+      <div class="line">
+        <span class="k">Moon:</span>
+        <span class="pill" id="moonLine">—</span>
+      </div>
+      <div class="line">
         <span class="k">Tide events:</span>
         <span class="pill" id="tideEventsLine">—</span>
       </div>
@@ -336,6 +344,37 @@
     </div>
   </div>
 
+
+  <!-- ================= Water temperature trend ================= -->
+  <div class="card" id="trendSection" hidden>
+    <div class="row" style="justify-content: space-between; align-items: center;">
+      <div>
+        <div class="secTitle">Water temperature trend</div>
+        <div class="small">Daily averages. Tap a source in the table (or legend) to hide or show its line.</div>
+      </div>
+      <div class="seg" role="group" aria-label="Trend range">
+        <button type="button" data-tdays="7">1W</button>
+        <button type="button" data-tdays="14">2W</button>
+        <button type="button" data-tdays="35">5W</button>
+        <button type="button" data-tdays="91">3M</button>
+        <button type="button" data-tdays="365">1Y</button>
+      </div>
+    </div>
+    <div class="trendWrap"><div id="trendPlot" aria-label="Water temperature trend chart"></div></div>
+    <div class="tableWrap" style="margin-top:10px;">
+      <table id="trendTable">
+        <thead>
+          <tr>
+            <th>Source</th>
+            <th class="right">Latest</th>
+            <th class="right">Change<span class="wideOnly"> over range</span></th>
+            <th class="right wideOnlyCol">Low – high</th>
+          </tr>
+        </thead>
+        <tbody id="trendBody"></tbody>
+      </table>
+    </div>
+  </div>
 
   <div class="card" id="sundaySection">
     <div class="secTitle">Sunday 10:00 meets</div>
@@ -405,37 +444,6 @@
           </tr>
         </thead>
         <tbody id="tideTableBody"></tbody>
-      </table>
-    </div>
-  </div>
-
-  <!-- ================= Water temperature trend ================= -->
-  <div class="card" id="trendSection" hidden>
-    <div class="row" style="justify-content: space-between; align-items: center;">
-      <div>
-        <div class="secTitle">Water temperature trend</div>
-        <div class="small">Daily averages. Tap a source in the table (or legend) to hide or show its line.</div>
-      </div>
-      <div class="seg" role="group" aria-label="Trend range">
-        <button type="button" data-tdays="7">1W</button>
-        <button type="button" data-tdays="14">2W</button>
-        <button type="button" data-tdays="35">5W</button>
-        <button type="button" data-tdays="91">3M</button>
-        <button type="button" data-tdays="365">1Y</button>
-      </div>
-    </div>
-    <div class="trendWrap"><div id="trendPlot" aria-label="Water temperature trend chart"></div></div>
-    <div class="tableWrap" style="margin-top:10px;">
-      <table id="trendTable">
-        <thead>
-          <tr>
-            <th>Source</th>
-            <th class="right">Latest</th>
-            <th class="right">Change<span class="wideOnly"> over range</span></th>
-            <th class="right wideOnlyCol">Low – high</th>
-          </tr>
-        </thead>
-        <tbody id="trendBody"></tbody>
       </table>
     </div>
   </div>
@@ -1644,6 +1652,213 @@ function updateSelectedLine(dt, vFt){
     `${fmtHM(dt)}  Tide ${vFt.toFixed(2)} ft (${vM.toFixed(2)} m)  •  ${pctTxt}`;
 }
 
+// Sun position (standard low-precision solar formulas, ~1 min accuracy)
+const SUN_RAD = Math.PI / 180, SUN_DAY_MS = 86400000, SUN_J1970 = 2440588, SUN_J2000 = 2451545;
+function sunTimes(date, lat, lon){
+  const toJulian = (d) => d.valueOf() / SUN_DAY_MS - 0.5 + SUN_J1970;
+  const fromJulian = (j) => new Date((j + 0.5 - SUN_J1970) * SUN_DAY_MS);
+  const e = SUN_RAD * 23.4397, J0 = 0.0009;
+  const lw = SUN_RAD * -lon, phi = SUN_RAD * lat;
+  const d = toJulian(date) - SUN_J2000;
+  const n = Math.round(d - J0 - lw / (2 * Math.PI));
+  const ds = J0 + lw / (2 * Math.PI) + n;
+  const M = SUN_RAD * (357.5291 + 0.98560028 * ds);
+  const C = SUN_RAD * (1.9148 * Math.sin(M) + 0.02 * Math.sin(2 * M) + 0.0003 * Math.sin(3 * M));
+  const L = M + C + SUN_RAD * 102.9372 + Math.PI;
+  const dec = Math.asin(Math.sin(e) * Math.sin(L));
+  const transit = (a) => SUN_J2000 + a + 0.0053 * Math.sin(M) - 0.0069 * Math.sin(2 * L);
+  const Jnoon = transit(ds);
+  const at = (h) => {                       // h = sun altitude in degrees
+    const cosW = (Math.sin(h * SUN_RAD) - Math.sin(phi) * Math.sin(dec)) / (Math.cos(phi) * Math.cos(dec));
+    if(cosW < -1 || cosW > 1) return [null, null];   // polar day/night
+    const w = Math.acos(cosW);
+    const Jset = transit(J0 + (w + lw) / (2 * Math.PI) + n);
+    return [fromJulian(Jnoon - (Jset - Jnoon)), fromJulian(Jset)];
+  };
+  const [sunrise, sunset] = at(-0.833);
+  const [dawn, dusk] = at(-6);              // civil twilight
+  return { dawn, sunrise, noon: fromJulian(Jnoon), sunset, dusk };
+}
+
+// Moon position, rise/set and phase (standard low-precision formulas)
+const MOON_RAD = Math.PI / 180, MOON_E = MOON_RAD * 23.4397;
+function moonToDays(date){ return date.valueOf() / 86400000 - 0.5 + 2440588 - 2451545; }
+function moonRA(l, b){ return Math.atan2(Math.sin(l)*Math.cos(MOON_E) - Math.tan(b)*Math.sin(MOON_E), Math.cos(l)); }
+function moonDec(l, b){ return Math.asin(Math.sin(b)*Math.cos(MOON_E) + Math.cos(b)*Math.sin(MOON_E)*Math.sin(l)); }
+function moonCoords(d){
+  // Main periodic terms of the lunar theory (longitude, latitude, distance);
+  // good to a few arc-minutes, i.e. rise/set within a few minutes.
+  const r = MOON_RAD;
+  const L  = r * (218.3165 + 13.17639648 * d);     // mean longitude
+  const Mm = r * (134.9634 + 13.06499295 * d);     // moon mean anomaly
+  const Ms = r * (357.5291 + 0.98560028 * d);      // sun mean anomaly
+  const D  = r * (297.8502 + 12.19074912 * d);     // mean elongation
+  const F  = r * (93.2721 + 13.22935024 * d);      // argument of latitude
+  const l = L + r * (6.289 * Math.sin(Mm) - 1.274 * Math.sin(Mm - 2*D) + 0.658 * Math.sin(2*D)
+                   - 0.186 * Math.sin(Ms) - 0.059 * Math.sin(2*Mm - 2*D) - 0.057 * Math.sin(Mm - 2*D + Ms)
+                   + 0.053 * Math.sin(Mm + 2*D) + 0.046 * Math.sin(2*D - Ms) + 0.041 * Math.sin(Mm - Ms)
+                   - 0.035 * Math.sin(D) - 0.031 * Math.sin(Mm + Ms) - 0.015 * Math.sin(2*F - 2*D)
+                   + 0.011 * Math.sin(Mm - 4*D));
+  const b = r * (5.128 * Math.sin(F) + 0.281 * Math.sin(Mm + F) + 0.278 * Math.sin(Mm - F)
+                + 0.173 * Math.sin(2*D - F) + 0.055 * Math.sin(2*D - Mm + F) + 0.046 * Math.sin(2*D - Mm - F)
+                + 0.033 * Math.sin(2*D + F) + 0.017 * Math.sin(2*Mm + F));
+  const dist = 385000.56 - 20905.36 * Math.cos(Mm) - 3699.11 * Math.cos(2*D - Mm)
+             - 2955.97 * Math.cos(2*D) - 569.93 * Math.cos(2*Mm) + 246.16 * Math.cos(2*Mm - 2*D);
+  return { ra: moonRA(l, b), dec: moonDec(l, b), dist };
+}
+function sunCoordsForMoon(d){
+  const M = MOON_RAD * (357.5291 + 0.98560028 * d);
+  const C = MOON_RAD * (1.9148*Math.sin(M) + 0.02*Math.sin(2*M) + 0.0003*Math.sin(3*M));
+  const L = M + C + MOON_RAD * 102.9372 + Math.PI;
+  return { ra: moonRA(L, 0), dec: moonDec(L, 0) };
+}
+function moonAltitude(date, lat, lon){
+  const lw = MOON_RAD * -lon, phi = MOON_RAD * lat, d = moonToDays(date), c = moonCoords(d);
+  const H = MOON_RAD * (280.16 + 360.9856235 * d) - lw - c.ra;
+  // geocentric altitude; rise/set is when it crosses +0.125° (parallax, refraction, semi-diameter)
+  return Math.asin(Math.sin(phi)*Math.sin(c.dec) + Math.cos(phi)*Math.cos(c.dec)*Math.cos(H));
+}
+// Rise/set within the local calendar day that starts at `dayStart` (local midnight)
+function moonTimes(dayStart, lat, lon){
+  const hc = 0.125 * MOON_RAD, at = (hrs) => moonAltitude(new Date(dayStart.getTime() + hrs*3600000), lat, lon) - hc;
+  let h0 = at(0), rise = null, set = null;
+  for(let i = 1; i <= 24; i += 2){
+    const h1 = at(i), h2 = at(i + 1);
+    const a = (h0 + h2) / 2 - h1, b = (h2 - h0) / 2, xe = -b / (2 * a), ye = (a * xe + b) * xe + h1;
+    const disc = b * b - 4 * a * h1;
+    let roots = 0, x1 = 0, x2 = 0;
+    if(disc >= 0){
+      const dx = Math.sqrt(disc) / (Math.abs(a) * 2);
+      x1 = xe - dx; x2 = xe + dx;
+      if(Math.abs(x1) <= 1) roots++;
+      if(Math.abs(x2) <= 1) roots++;
+      if(x1 < -1) x1 = x2;
+    }
+    if(roots === 1){ if(h0 < 0) rise = i + x1; else set = i + x1; }
+    else if(roots === 2){ rise = i + (ye < 0 ? x2 : x1); set = i + (ye < 0 ? x1 : x2); }
+    if(rise !== null && set !== null) break;
+    h0 = h2;
+  }
+  const toDate = (hrs) => hrs === null ? null : new Date(dayStart.getTime() + hrs*3600000);
+  return { rise: toDate(rise), set: toDate(set), alwaysUp: rise === null && set === null && h0 > 0 };
+}
+// fraction lit (0..1) and phase (0 new, .25 first quarter, .5 full, .75 last quarter)
+function moonPhase(date){
+  const d = moonToDays(date), s = sunCoordsForMoon(d), m = moonCoords(d), sdist = 149598000;
+  const phi = Math.acos(Math.sin(s.dec)*Math.sin(m.dec) + Math.cos(s.dec)*Math.cos(m.dec)*Math.cos(s.ra - m.ra));
+  const inc = Math.atan2(sdist * Math.sin(phi), m.dist - sdist * Math.cos(phi));
+  const angle = Math.atan2(Math.cos(s.dec) * Math.sin(s.ra - m.ra),
+    Math.sin(s.dec)*Math.cos(m.dec) - Math.cos(s.dec)*Math.sin(m.dec)*Math.cos(s.ra - m.ra));
+  return { fraction: (1 + Math.cos(inc)) / 2, phase: 0.5 + 0.5 * inc * (angle < 0 ? -1 : 1) / Math.PI };
+}
+function moonPhaseInfo(phase){
+  // Principal phases only within ~half a day of the exact moment (like USNO); otherwise the
+  // in-between names.
+  const dist = (x) => Math.min(Math.abs(phase - x), 1 - Math.abs(phase - x));
+  let emoji, name;
+  if(dist(0) < 0.017){ emoji = "🌑"; name = "New moon"; }
+  else if(dist(0.25) < 0.017){ emoji = "🌓"; name = "First quarter"; }
+  else if(dist(0.5) < 0.017){ emoji = "🌕"; name = "Full moon"; }
+  else if(dist(0.75) < 0.017){ emoji = "🌗"; name = "Last quarter"; }
+  else if(phase < 0.25){ emoji = "🌒"; name = "Waxing crescent"; }
+  else if(phase < 0.5){ emoji = "🌔"; name = "Waxing gibbous"; }
+  else if(phase < 0.75){ emoji = "🌖"; name = "Waning gibbous"; }
+  else { emoji = "🌘"; name = "Waning crescent"; }
+  // spring tides within ~2 days of new/full moon, neap within ~2 days of the quarters
+  const tide = (dist(0) < 0.07 || dist(0.5) < 0.07) ? "spring tides (bigger range)"
+             : (dist(0.25) < 0.07 || dist(0.75) < 0.07) ? "neap tides (smaller range)" : "";
+  return { emoji, name, tide };
+}
+
+// Moon strip: when the moon is above the horizon during the day shown
+const MOON_COLORS = { up:"#c9d3e6", down:"#f1f2f5" };
+function moonDecor(dayStart, dayEnd){
+  const t = moonTimes(dayStart, NWS_LAT, NWS_LON);
+  const mid = new Date(dayStart); mid.setHours(12, 0, 0, 0);
+  const ph = moonPhase(mid), info = moonPhaseInfo(ph.phase);
+  // Is the moon up at midnight? Up if it sets before it rises (or never rises/sets but is up)
+  const upAtStart = t.alwaysUp || (t.set && (!t.rise || t.set < t.rise));
+  const edges = [dayStart, t.rise, t.set, dayEnd].filter(Boolean).sort((a, b) => a - b);
+  const shapes = [], annotations = [];
+  let up = upAtStart;
+  for(let i = 0; i < edges.length - 1; i++){
+    const x0 = edges[i], x1 = edges[i + 1];
+    if(i > 0) up = (edges[i] === t.rise) ? true : (edges[i] === t.set ? false : up);
+    if(x1 > x0) shapes.push({ type:"rect", xref:"x", yref:"paper", x0, x1, y0:1.15, y1:1.26,
+                              fillcolor: up ? MOON_COLORS.up : MOON_COLORS.down, line:{ width:0 }, layer:"above" });
+  }
+  const label = (x, text) => annotations.push({ x, y:1.205, xref:"x", yref:"paper", text, showarrow:false,
+    font:{ size:11, color:"#111" }, bgcolor:"rgba(255,255,255,0.92)", borderpad:2 });
+  if(t.rise) label(t.rise, `${info.emoji}↑ ${fmtHM(t.rise)}`);
+  if(t.set)  label(t.set,  `${info.emoji}↓ ${fmtHM(t.set)}`);
+  if(!t.rise && !t.set) label(new Date((dayStart.getTime() + dayEnd.getTime())/2),
+                              `${info.emoji} ${t.alwaysUp ? "up all day" : "down all day"}`);
+  return { shapes, annotations, times: t, phase: ph, info };
+}
+
+function updateMoonLine(m){
+  const el = document.getElementById("moonLine");
+  const parts = [`${m.info.emoji} ${m.info.name}, ${(m.phase.fraction*100).toFixed(0)}% lit`];
+  if(m.times.rise) parts.push(`moonrise ${fmtHM(m.times.rise)}`);
+  if(m.times.set)  parts.push(`moonset ${fmtHM(m.times.set)}`);
+  if(!m.times.rise && !m.times.set) parts.push(m.times.alwaysUp ? "up all day" : "down all day");
+  if(m.info.tide)  parts.push(m.info.tide);
+  el.textContent = parts.join(" • ");
+}
+
+// Day/night strip drawn above the tide curve, plus faint night shading on it.
+const SUN_COLORS = { night:"#24324f", twilight:"#f2b880", day:"#ffe8a3" };
+function dayNightDecor(dayStart, dayEnd){
+  const noon = new Date(dayStart); noon.setHours(12, 0, 0, 0);
+  const t = sunTimes(noon, NWS_LAT, NWS_LON);
+  const clamp = (d) => new Date(Math.min(dayEnd, Math.max(dayStart, d)));
+  // Segments across the day: night | twilight | day | twilight | night
+  const segs = [];
+  if(t.sunrise && t.sunset){
+    const dawn = t.dawn || t.sunrise, dusk = t.dusk || t.sunset;
+    segs.push(["night", dayStart, dawn], ["twilight", dawn, t.sunrise], ["day", t.sunrise, t.sunset],
+              ["twilight", t.sunset, dusk], ["night", dusk, dayEnd]);
+  }
+  const shapes = [], annotations = [];
+  for(const [kind, a, b] of segs){
+    const x0 = clamp(a), x1 = clamp(b);
+    if(x1 <= x0) continue;
+    // strip above the plot
+    shapes.push({ type:"rect", xref:"x", yref:"paper", x0, x1, y0:1.02, y1:1.13,
+                  fillcolor: SUN_COLORS[kind], line:{ width:0 }, layer:"above" });
+    // faint shading of dark hours on the curve itself
+    if(kind !== "day"){
+      shapes.push({ type:"rect", xref:"x", yref:"paper", x0, x1, y0:0, y1:1,
+                    fillcolor: kind === "night" ? "rgba(36,50,79,0.08)" : "rgba(242,184,128,0.14)",
+                    line:{ width:0 }, layer:"below" });
+    }
+  }
+  const label = (x, text, anchor) => annotations.push({
+    x, y:1.075, xref:"x", yref:"paper", text, showarrow:false, xanchor:anchor,
+    font:{ size:11, color:"#111" }, bgcolor:"rgba(255,255,255,0.92)", borderpad:2
+  });
+  if(t.sunrise) label(t.sunrise, `🌅 ${fmtHM(t.sunrise)}`, "center");
+  if(t.sunset)  label(t.sunset,  `🌇 ${fmtHM(t.sunset)}`, "center");
+  // moon at the middle of each night segment (cartoon touch, only if there is room)
+  for(const [kind, a, b] of segs){
+    if(kind !== "night") continue;
+    const x0 = clamp(a), x1 = clamp(b);
+    if(x1 - x0 < 3*3600000) continue;
+    annotations.push({ x: new Date((x0.getTime() + x1.getTime())/2), y:1.075, xref:"x", yref:"paper",
+                       text:"🌙", showarrow:false, font:{ size:11 } });
+  }
+  return { shapes, annotations, times: t };
+}
+
+function updateSunLine(t){
+  const el = document.getElementById("sunLine");
+  if(!t?.sunrise || !t?.sunset){ el.textContent = "—"; return; }
+  const mins = Math.round((t.sunset - t.sunrise) / 60000);
+  el.textContent = `🌅 Sunrise ${fmtHM(t.sunrise)} • 🌇 Sunset ${fmtHM(t.sunset)} • ` +
+    `daylight ${Math.floor(mins/60)}h ${pad2(mins % 60)}m` +
+    (t.dawn && t.dusk ? ` (first light ${fmtHM(t.dawn)}, last light ${fmtHM(t.dusk)})` : "");
+}
+
 // Hour where the plot's dotted line/marker starts: 10:00 (Sunday meet) unless
 // the reader tapped a specific hour in the tide calendar.
 let PLOT_CURSOR_HOUR = 10;
@@ -1660,12 +1875,20 @@ function renderPlot(){
   cursor.setHours(PLOT_CURSOR_HOUR,0,0,0);
   const cursorY = tideAtTimeFt(cursor);
 
+  const dayStart = new Date(CURVE[0].t); dayStart.setHours(0, 0, 0, 0);
+  const dayEnd = new Date(dayStart); dayEnd.setDate(dayEnd.getDate() + 1);
+  const sun = dayNightDecor(dayStart, dayEnd);
+  updateSunLine(sun.times);
+  const moon = moonDecor(dayStart, dayEnd);
+  updateMoonLine(moon);
+
   Plotly.newPlot(plotDiv, [
     { x: xs, y: ys, mode:"lines", name:"Tide" },
     { x: [cursor], y: [cursorY], mode:"markers", name:"Selected", marker:{size:11} }
   ], {
-    margin: { l: 60, r: 20, t: 10, b: 60 },
-    xaxis: { title: "Local time (Boston)", type:"date", fixedrange:true, tickformat:"%H:%M" },
+    margin: { l: 60, r: 20, t: 70, b: 60 },
+    xaxis: { title: "Local time (Boston)", type:"date", fixedrange:true, tickformat:"%H:%M",
+             range: [dayStart, dayEnd] },
     yaxis: { title: "Height (ft)", fixedrange:true },
     showlegend: false,
     hovermode: false,
@@ -1676,7 +1899,8 @@ function renderPlot(){
       y0: yMin, y1: yMax,
       xref:"x", yref:"y",
       line:{ width:2, dash:"dot", color:"#000" }
-    }]
+    }, ...sun.shapes, ...moon.shapes],   // shapes[0] must stay the cursor line (scrub updates it)
+    annotations: [...sun.annotations, ...moon.annotations]
   }, {
     responsive:true,
     displayModeBar:false,
@@ -1715,9 +1939,11 @@ function installScrub(){
     if(!CURVE.length || !plotDiv._fullLayout) return;
 
     const rect = overlay.getBoundingClientRect();
-    const xpx = clientX - rect.left;
-
     const xaxis = plotDiv._fullLayout.xaxis;
+    // p2d() expects pixels from the start of the x axis, not from the plot's
+    // left edge: subtract the left margin (xaxis._offset), otherwise the time
+    // read out lands right of the finger (hours off on a phone).
+    const xpx = clientX - rect.left - xaxis._offset;
     const xDate = new Date(xaxis.p2d(xpx));
 
     const minT = CURVE[0].t;
