@@ -10,6 +10,7 @@ A lightweight, mobile-friendly tide + conditions viewer for Boston.
   - **% of day max high** (relative to the highest high tide event that day)
   - height in **feet** and **meters**
 - See **high/low tide event times**
+- See a **tide calendar heatmap** (days × hours, 05:00–22:00, 2 or 5 weeks) with Sunday 10:00 meets outlined and a "now" marker, plus a **Sunday 10:00 meets** table for the next 8 Sundays (tide at 10:00, rising/falling, % of day max high, high/low times). Tap a day in either to open it in the main plot.
 - See latest **wind and air temperature at Castle Island**, **water temperature** (Portland ME coastal station, Gallops Island once it reports, plus offshore buoy)
 - See **NWS forecast** for the selected date (only when within the next ~7 days)
 - **Beach bacteria warning**: shows rain at Logan over the last 48h and a warning at 0.5 in or more (higher bacteria risk at harbor beaches from Quincy to Castle Island), plus links to the Mass DPH beach dashboard (summer only), BWSC sewer overflow alerts, and Save the Harbor's report card
@@ -74,6 +75,8 @@ Example parameters used:
 
 **Portland, ME `8418150` (CO-OPS)** `water_temperature`, `date=latest`. In winter, Portland has tracked Boston beach temperatures more closely than the offshore buoy, which can read 5°F or more warmer.
 
+**Satellite water temp at L Street (trial):** a daily GitHub Action (`.github/workflows/satellite-sst.yml`) runs `scripts/fetch_sst.py`, which reads satellite sea-surface temperature for the water just off L Street and commits it to `data/sst.json`. The satellite ERDDAP servers don't allow browser (CORS) access, so the page reads that file from the site instead. It uses NOAA CoastWatch blended SST (`noaacwBLENDEDsstDaily`, ~5 km, preferred) and NASA JPL MUR SST (`jplMURSST41`, ~1 km). It's an estimate, 1–2 days old, and less reliable right at the shoreline, so compare it with your thermometer over the winter. The line is hidden if the reading is more than 5 days old. To refresh on demand, go to **Actions → Satellite water temp (L Street) → Run workflow**.
+
 Note: the Boston tide station `8443970` has no water temperature sensor.
 
 The **Coastal Water Temperature** table and map at the bottom list buoy `44013` (same ERDDAP feed as below) alongside the CO-OPS stations (Portland, Bar Harbor, Woods Hole, Nantucket).
@@ -131,6 +134,7 @@ If not available, the app displays `—`.
 - `seahorse.png` — logo used in the page header
 - `manifest.webmanifest`, `icon-192.png`, `icon-512.png`, `icon-maskable-512.png`, `apple-touch-icon.png` — home-screen app setup and icons (square versions of the seahorse)
 - `README.md` — this file
+- `scripts/fetch_sst.py`, `.github/workflows/satellite-sst.yml`, `data/sst.json` — daily satellite water temp fetch and its output
 - `LICENSE` — MIT License
 
 No build step. No backend. Just static hosting.
