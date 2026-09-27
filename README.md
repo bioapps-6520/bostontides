@@ -10,7 +10,7 @@ A lightweight, mobile-friendly tide + conditions viewer for Boston.
   - **% of day max high** (relative to the highest high tide event that day)
   - height in **feet** and **meters**
 - See **high/low tide event times**
-- See a **tide calendar heatmap** (days × hours, 05:00–22:00, 2 or 5 weeks) with Sunday 10:00 meets outlined and a "now" marker, plus a **Sunday 10:00 meets** table for the next 8 Sundays (tide at 10:00, rising/falling, % of day max high, high/low times). Tap a day in either to open it in the main plot.
+- See a **tide calendar heatmap** (days × hours, 05:00–22:00, 2 or 5 weeks) with Sunday 10:00 meets outlined and a "now" marker; color by **height** or by **% of day max high** (each day's highest high tide = 100%), and the tooltip shows both, plus a **Sunday 10:00 meets** table for the next 8 Sundays (tide at 10:00, rising/falling, % of day max high, high/low times). Tap a day in either to open it in the main plot.
 - See latest **wind and air temperature at Castle Island**, **water temperature** (Portland ME coastal station, Gallops Island once it reports, plus offshore buoy)
 - See **NWS forecast** for the selected date (only when within the next ~7 days)
 - **Beach bacteria warning**: shows rain at Logan over the last 48h and a warning at 0.5 in or more (higher bacteria risk at harbor beaches from Quincy to Castle Island), plus links to the Mass DPH beach dashboard (summer only), BWSC sewer overflow alerts, and Save the Harbor's report card
@@ -79,7 +79,7 @@ Example parameters used:
 
 Note: the Boston tide station `8443970` has no water temperature sensor.
 
-The **Coastal Water Temperature** table and map at the bottom list buoy `44013` (same ERDDAP feed as below) alongside the CO-OPS stations (Portland, Bar Harbor, Woods Hole, Nantucket).
+The **Coastal Water Temperature** table and map at the bottom list the satellite estimate at L Street (from `data/sst.json`, below), buoy `44013` (same ERDDAP feed as below) alongside the CO-OPS stations (Portland, Bar Harbor, Woods Hole, Nantucket).
 
 ---
 

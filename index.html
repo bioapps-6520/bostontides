@@ -144,6 +144,7 @@
     .cal .cell.now::after { content:""; position:absolute; left:50%; top:50%; width:6px; height:6px; margin:-3px 0 0 -3px; border-radius:50%; background:#fff; box-shadow:0 0 0 1.5px #111; }
     .calLegend { display:flex; flex-wrap:wrap; align-items:center; gap:8px 16px; margin-top:10px; font-size:12px; color: var(--muted); }
     .calLegend .bar { width:160px; height:10px; border-radius:3px; }
+    .calLegend .legendTitle { font-size:12px; color: var(--fg); margin-bottom:4px; }
     .calLegend .ticks { display:flex; justify-content:space-between; width:160px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:11px; }
     .calLegend .key { display:inline-flex; align-items:center; gap:6px; }
     .calLegend .swMeet { width:14px; height:12px; border-radius:3px; background:#6da7ec; box-shadow: inset 0 0 0 2px #fff, 0 0 0 1.5px #111; }
@@ -263,11 +264,17 @@
     <div class="row" style="justify-content: space-between; align-items: center;">
       <div>
         <div class="secTitle">Tide calendar</div>
-        <div class="small">Hourly tide height, 05:00 → 22:00. Darker = higher water. Tap a day to open it above.</div>
+        <div class="small">Hourly tide, 05:00 → 22:00. Darker = higher water. Tap a day to open it above.</div>
       </div>
-      <div class="seg" role="group" aria-label="Calendar range">
-        <button type="button" data-days="14">2 weeks</button>
-        <button type="button" data-days="35">5 weeks</button>
+      <div class="row" style="gap:8px;">
+        <div class="seg" role="group" aria-label="Color by">
+          <button type="button" data-mode="ft">Height</button>
+          <button type="button" data-mode="pct">% of day max</button>
+        </div>
+        <div class="seg" role="group" aria-label="Calendar range">
+          <button type="button" data-days="14">2 weeks</button>
+          <button type="button" data-days="35">5 weeks</button>
+        </div>
       </div>
     </div>
     <div class="small" id="calStatus" style="margin-top:8px;">Loading…</div>
@@ -276,6 +283,7 @@
     </div>
     <div class="calLegend" aria-hidden="true">
       <div>
+        <div class="legendTitle" id="calLegendTitle">Tide height</div>
         <div class="bar" id="calLegendBar"></div>
         <div class="ticks"><span id="calLegendMin">—</span><span id="calLegendMid"></span><span id="calLegendMax">—</span></div>
       </div>
@@ -362,7 +370,7 @@
     <div class="row" style="justify-content: space-between; align-items: baseline;">
       <div>
         <h2>Coastal Water Temperature (NOAA stations)</h2>
-        <div class="sub">Live water temperatures from stations that publish <span class="mono">water_temperature</span> via NOAA CO-OPS. Click a row or label to open the station page.</div>
+        <div class="sub">Latest water temperatures: satellite estimate at L Street, offshore buoy 44013, and NOAA CO-OPS coastal stations. Click a row or label to open the station page.</div>
       </div>
       <div class="small"><span class="pillLite" id="coastalLastUpdated">Loading…</span></div>
     </div>
@@ -1202,6 +1210,7 @@ const MONTH = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov"
 
 let CAL = null;   // { byKey: Map("YYYY-MM-DD HH" -> ft), hilo: [...], days: [iso...], minFt, maxFt }
 let CAL_DAYS_SHOWN = (window.innerWidth < 600) ? 14 : 35;
+let CAL_COLOR_MODE = "ft";   // "ft" = tide height, "pct" = % of that day's max high
 
 function isoOf(d){ return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`; }
 function addDays(d, n){ const x = new Date(d); x.setDate(x.getDate() + n); return x; }
@@ -1273,6 +1282,28 @@ function trendAt(dayDate, hour){
 }
 function dayHilo(dayDate){ return CAL.hilo.filter(x => isoOf(x.t) === isoOf(dayDate)); }
 
+// Day's max high = highest high-tide event that day (same as the main table);
+// falls back to the highest hourly value if the day has no high event.
+const DAY_MAX_CACHE = new Map();
+function dayMaxHighFt(dayDate){
+  const key = isoOf(dayDate);
+  if(DAY_MAX_CACHE.has(key)) return DAY_MAX_CACHE.get(key);
+  const highs = dayHilo(dayDate).filter(x => x.type === "H" || x.type === "HH").map(x => x.vFt);
+  let m = highs.length ? Math.max(...highs) : null;
+  if(m == null){
+    const hourly = [];
+    for(let h = 0; h < 24; h++){ const v = tideAt(dayDate, h); if(v != null) hourly.push(v); }
+    m = hourly.length ? Math.max(...hourly) : null;
+  }
+  DAY_MAX_CACHE.set(key, m);
+  return m;
+}
+function pctOfDayMax(dayDate, hour){
+  const v = tideAt(dayDate, hour), m = dayMaxHighFt(dayDate);
+  if(v == null || !m || m <= 0) return null;
+  return Math.max(0, Math.min(100, 100 * v / m));
+}
+
 function openDay(dayDate){
   const iso = isoOf(dayDate);
   const el = document.getElementById("date");
@@ -1315,8 +1346,11 @@ function renderCalendar(){
       const v = tideAt(day, h);
       const c = document.createElement("div");
       c.className = "cell";
-      if(v != null) c.style.background = rampColor((v - CAL.minFt) / span);
-      else c.style.background = "#f0efec";
+      const pct = pctOfDayMax(day, h);
+      const t = (CAL_COLOR_MODE === "pct")
+        ? (pct == null ? null : pct / 100)
+        : (v == null ? null : (v - CAL.minFt) / span);
+      c.style.background = (t == null) ? "#f0efec" : rampColor(t);
       if(isSun && h === MEET_HOUR) c.classList.add("meet");
       if(isToday && h === now.getHours()) c.classList.add("now");
       c.dataset.day = isoOf(day); c.dataset.h = h;
@@ -1342,10 +1376,13 @@ function renderCalendar(){
     a.textContent = `${fmtDayLabel(day)} · ${pad2(h)}:00`;
     const b = document.createElement("div");
     b.textContent = (v == null) ? "—" : `${v.toFixed(1)} ft (${ftToM(v).toFixed(1)} m)`;
+    const pct = pctOfDayMax(day, h);
+    const p = document.createElement("div");
+    p.textContent = (pct == null) ? "" : `${pct.toFixed(0)}% of day max high`;
     const c = document.createElement("div");
     c.className = "m";
     c.textContent = trendAt(day, h);
-    tip.append(a, b, c);
+    tip.append(a, b, p, c);
     tip.style.display = "block";
     const r = tip.getBoundingClientRect();
     let left = e.clientX + 14, top = e.clientY - r.height - 12;
@@ -1363,12 +1400,22 @@ function renderCalendar(){
   // Legend
   document.getElementById("calLegendBar").style.background =
     `linear-gradient(90deg, ${CAL_RAMP.join(",")})`;
-  document.getElementById("calLegendMin").textContent = `${CAL.minFt.toFixed(0)} ft`;
-  document.getElementById("calLegendMid").textContent = `${((CAL.minFt + CAL.maxFt)/2).toFixed(0)}`;
-  document.getElementById("calLegendMax").textContent = `${CAL.maxFt.toFixed(0)} ft`;
+  if(CAL_COLOR_MODE === "pct"){
+    document.getElementById("calLegendTitle").textContent = "% of day max high";
+    document.getElementById("calLegendMin").textContent = "0%";
+    document.getElementById("calLegendMid").textContent = "50%";
+    document.getElementById("calLegendMax").textContent = "100%";
+  } else {
+    document.getElementById("calLegendTitle").textContent = "Tide height (ft)";
+    document.getElementById("calLegendMin").textContent = `${CAL.minFt.toFixed(0)} ft`;
+    document.getElementById("calLegendMid").textContent = `${((CAL.minFt + CAL.maxFt)/2).toFixed(0)}`;
+    document.getElementById("calLegendMax").textContent = `${CAL.maxFt.toFixed(0)} ft`;
+  }
 
-  document.querySelectorAll("#calendarSection .seg button").forEach(btn =>
+  document.querySelectorAll("#calendarSection .seg button[data-days]").forEach(btn =>
     btn.setAttribute("aria-pressed", String(Number(btn.dataset.days) === CAL_DAYS_SHOWN)));
+  document.querySelectorAll("#calendarSection .seg button[data-mode]").forEach(btn =>
+    btn.setAttribute("aria-pressed", String(btn.dataset.mode === CAL_COLOR_MODE)));
 }
 
 function renderSundays(){
@@ -1418,7 +1465,8 @@ async function loadCalendar(){
   status.textContent = "Loading…";
   try{
     CAL = buildCalendarModel(await fetchCalendarData());
-    status.textContent = `NOAA predictions for Boston (${TIDE_STATION}). Color scale: ${CAL.minFt.toFixed(1)} to ${CAL.maxFt.toFixed(1)} ft.`;
+    DAY_MAX_CACHE.clear();
+    status.textContent = `NOAA predictions for Boston (${TIDE_STATION}).`;
     renderCalendar();
     renderSundays();
   } catch(e){
@@ -1427,9 +1475,15 @@ async function loadCalendar(){
   }
 }
 
-document.querySelectorAll("#calendarSection .seg button").forEach(btn => {
+document.querySelectorAll("#calendarSection .seg button[data-days]").forEach(btn => {
   btn.addEventListener("click", () => {
     CAL_DAYS_SHOWN = Number(btn.dataset.days);
+    renderCalendar();
+  });
+});
+document.querySelectorAll("#calendarSection .seg button[data-mode]").forEach(btn => {
+  btn.addEventListener("click", () => {
+    CAL_COLOR_MODE = btn.dataset.mode;
     renderCalendar();
   });
 });
@@ -1497,6 +1551,16 @@ function buildTable(isoDate){
 /* labelOffsetPx nudges the label boxes to avoid overlap */
 const coastalStations = [
   {
+    id:"NOAA blended SST (satellite, 1–2 days old)",
+    name:"Satellite estimate at L Street",
+    short:"Satellite (L St)",
+    lat:42.325,
+    lon:-71.025,
+    home:"https://coastwatch.noaa.gov/erddap/griddap/noaacwBLENDEDsstDaily.html",
+    source:"satellite",   // data/sst.json, written daily by a GitHub Action
+    labelOffsetPx: { x: -80, y: -46 }   /* above Boston, clear of the buoy and Portland labels */
+  },
+  {
     id:"44013",
     name:"Offshore buoy, 16 NM E of Boston",
     short:"Buoy 44013",
@@ -1522,7 +1586,7 @@ const coastalStations = [
     lat:44.3917,
     lon:-68.2050,
     home:"https://tidesandcurrents.noaa.gov/stationhome.html?id=8413320",
-    labelOffsetPx: { x: 0, y: 0 }
+    labelOffsetPx: { x: -40, y: 0 }   /* keep inside the map's right edge on phones */
   },
   {
     id:"8447930",
@@ -1541,7 +1605,7 @@ const coastalStations = [
     lon:-70.09819,
     home:"https://tidesandcurrents.noaa.gov/stationhome.html?id=8449130",
     /* push Nantucket label slightly right+down to avoid Woods Hole overlap */
-    labelOffsetPx: { x: 52, y: 18 }
+    labelOffsetPx: { x: 52, y: 28 }
   }
 ];
 
@@ -1647,6 +1711,16 @@ async function loadCoastalTemps(){
   const rows = [];
   for(const st of coastalStations){
     const data = { waterF:null, airF:null, asOf:null }; // asOf: Date
+
+    if(st.source === "satellite"){
+      try{
+        const sst = await fetchSatelliteSst();
+        if(sst){ data.waterF = sst.tempF; data.asOf = sst.time; }
+      } catch(_) {}
+      rows.push({ st, data });
+      upsertMarker(st, data.waterF);
+      continue;
+    }
 
     if(st.source === "ndbc"){
       try{
