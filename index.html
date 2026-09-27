@@ -560,7 +560,7 @@
   <!-- ================= Earth, sun and moon (cartoon) ================= -->
   <div class="card" id="orbitSection">
     <div class="secTitle">Earth, sun and moon</div>
-    <div class="small">Pick a date and time here or on the tide curve (they stay in sync). Looking down on the North Pole, not to scale. The blue oval is the tidal bulge; when Boston sits in it, it's high tide.</div>
+    <div class="small">Pick a date and time here or on the tide curve (they stay in sync). Looking down on the North Pole, not to scale, with the sun kept on the left (the Earth also circles the sun once a year, about 1° a day, too little to see over one day). The blue oval is the tidal bulge; when Boston sits in it, it's high tide.</div>
     <div class="orbitControls">
       <label>Date <input id="orbitDate" type="date" /></label>
       <label class="orbitTime">Time <span id="orbitTimeLabel" class="mono">10:00</span>
@@ -1787,6 +1787,17 @@ function renderOrbit(dt){
   // Moon orbit
   svgEl("circle", { cx, cy, r:orbitR, fill:"none", stroke:"#56607e", "stroke-width":1, "stroke-dasharray":"3 5" }, svg);
 
+  // Arrowhead for the rotation arrows
+  const defs = svgEl("defs", {}, svg);
+  const mk = svgEl("marker", { id:"orbitArrow", viewBox:"0 0 10 10", refX:6, refY:5,
+                               markerWidth:7, markerHeight:7, orient:"auto-start-reverse" }, defs);
+  svgEl("path", { d:"M 0 0 L 10 5 L 0 10 z", fill:"#e8eefc" }, mk);
+  // Counter-clockwise arc (as seen from above the North Pole) from a0° to a1°
+  const ccwArc = (r, a0, a1) => {
+    const [x0, y0] = polar(cx, cy, r, a0), [x1, y1] = polar(cx, cy, r, a1);
+    return `M ${x0.toFixed(1)} ${y0.toFixed(1)} A ${r} ${r} 0 0 0 ${x1.toFixed(1)} ${y1.toFixed(1)}`;
+  };
+
   // Tidal bulge: an ocean oval around the Earth, long axis along bulgeDeg
   svgEl("ellipse", { cx, cy, rx:R * 1.45, ry:R * 1.08, fill:"#4fa3ff", opacity:0.6,
                      transform:`rotate(${-bulgeDeg} ${cx} ${cy})` }, svg);
@@ -1795,6 +1806,13 @@ function renderOrbit(dt){
   svgEl("circle", { cx, cy, r:R, fill:"#2f8f5b" }, svg);
   svgEl("path", { d:`M ${cx} ${cy - R} A ${R} ${R} 0 0 1 ${cx} ${cy + R} Z`, fill:"#0b1024", opacity:0.62 }, svg);
   svgEl("circle", { cx, cy, r:4, fill:"#e8eefc" }, svg);   // North Pole
+
+  // Earth's spin: counter-clockwise, once a day (arrow on the lower right, clear of the sun side)
+  svgEl("path", { d:ccwArc(R * 1.72, 285, 345), fill:"none", stroke:"#e8eefc", "stroke-width":1.6,
+                  "marker-end":"url(#orbitArrow)" }, svg);
+  const [ex, ey] = polar(cx, cy, R * 1.72 + 16, 300);
+  svgEl("text", { x:ex, y:ey, "text-anchor":"start", "font-size":10, fill:"#c9d3e6" }, svg)
+    .textContent = "Earth spins once a day";
 
   // Direction to the moon (for comparing with the bulge)
   const [mx0, my0] = polar(cx, cy, R + 4, moonDeg), [mx1, my1] = polar(cx, cy, orbitR - 16, moonDeg);
@@ -1806,6 +1824,12 @@ function renderOrbit(dt){
   svgEl("path", { d:`M ${mx} ${my - mr} A ${mr} ${mr} 0 0 0 ${mx} ${my + mr} Z`, fill:"#eef1f7" }, svg);
   const lbl = svgEl("text", { x:mx, y:my + mr + 13, "text-anchor":"middle", "font-size":11, fill:"#e8eefc" }, svg);
   lbl.textContent = `Moon ${info.emoji}`;
+  // Moon's orbit: counter-clockwise, once every 27.3 days (arrow just ahead of the moon)
+  svgEl("path", { d:ccwArc(orbitR + 9, moonDeg + 12, moonDeg + 38), fill:"none", stroke:"#e8eefc", "stroke-width":1.6,
+                  "marker-end":"url(#orbitArrow)" }, svg);
+  const [ox, oy] = polar(cx, cy, orbitR + 24, moonDeg + 25);
+  const ol = svgEl("text", { x:ox, y:oy + 3, "text-anchor":"middle", "font-size":10, fill:"#c9d3e6" }, svg);
+  ol.textContent = "orbits in 27.3 days";
 
   // Boston on the Earth's edge
   const [bx, by] = polar(cx, cy, R, bostonDeg);
@@ -1823,11 +1847,14 @@ function renderOrbit(dt){
   const prev = [...evs].reverse().find(x => x.t <= dt), next = evs.find(x => x.t > dt);
   const span = (ms) => { const m = Math.round(Math.abs(ms) / 60000), h = Math.floor(m / 60);
                          return h ? `${h}h ${pad2(m % 60)}m` : `${m} min`; };
+  // Flood = rising, water flowing into the harbor; ebb = falling, flowing out
+  const flow = (rising) => rising ? "rising (flood: water flowing into the harbor)"
+                                  : "falling (ebb: water flowing out of the harbor)";
   const near = [prev, next].filter(Boolean).find(x => Math.abs(x.t - dt) < 15 * 60000);
   if(near) tideTxt = `${isHigh(near) ? "high" : "low"} tide now`;
-  else if(prev) tideTxt = `${isHigh(prev) ? "falling" : "rising"}, ${span(dt - prev.t)} after ${isHigh(prev) ? "high" : "low"} tide` +
+  else if(prev) tideTxt = `${flow(!isHigh(prev))}, ${span(dt - prev.t)} after ${isHigh(prev) ? "high" : "low"} tide` +
                           (next ? ` (${isHigh(next) ? "high" : "low"} at ${fmtHM(next.t)})` : "");
-  else if(next) tideTxt = `${isHigh(next) ? "rising" : "falling"}, ${isHigh(next) ? "high" : "low"} tide at ${fmtHM(next.t)}`;
+  else if(next) tideTxt = `${flow(isHigh(next))}, ${isHigh(next) ? "high" : "low"} tide at ${fmtHM(next.t)}`;
   document.getElementById("orbitText").textContent =
     `${fmtHM(dt)}: Boston is on the ${isDay ? "day" : "night"} side • ${tideTxt}` +
     ` • ${info.emoji} ${info.name}, ${(mp.fraction*100).toFixed(0)}% lit` +
