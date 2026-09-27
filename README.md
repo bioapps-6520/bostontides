@@ -10,6 +10,7 @@ A lightweight, mobile-friendly tide + conditions viewer for Boston.
   - **% of day max high** (relative to the highest high tide event that day)
   - height in **feet** and **meters**
 - See **high/low tide event times**
+- See a **water temperature trend** chart (1 week, 2 weeks, 5 weeks, 3 months, 1 year): satellite at L Street (NASA MUR and NOAA blended), buoys 44013 and A01, and Portland ME as daily averages, with a table of latest value, change over the range and low–high (tap a row to hide or show a line); club thermometer readings appear as dots once the Google Form is set up
 - See a **tide calendar heatmap** (days × hours, 05:00–22:00, 2 weeks by default or 5 weeks) with Sunday 10:00 meets outlined and a "now" marker; color by **% of day max high** (default; each day's highest high tide = 100%) or by **height**, and the tooltip shows both, plus a **Sunday 10:00 meets** table for the next 8 Sundays (tide at 10:00, rising/falling, % of day max high, high/low times). Tap a day in either to open it in the main plot.
 - See latest **wind and air temperature at Castle Island**, **water temperature** (Portland ME coastal station, Gallops Island once it reports, plus offshore buoy)
 - See **NWS forecast** for the selected date (only when within the next ~7 days)
@@ -81,6 +82,8 @@ Example parameters used:
 
 **Water temperature sensors table (bottom of the page):** only sensors that measure the water directly, nearest to L Street first, with type, distance, latest °F/°C and time (hidden if older than 24 h): Gallops Island gauge (Stone Living Lab, not reporting yet), Fresh Pond buoy (USGS, freshwater reservoir), Danvers River at Beverly Pier (USGS, estuary), buoy 44013, buoy A01 (NERACOOS `A01_ocean_001m`, 1 m), buoy 44090 (Cape Cod Bay), and Portland ME (CO-OPS). All are read directly by the browser (NERACOOS ERDDAP, USGS Water Data API, CO-OPS).
 
+**Water temperature history (`data/water_history.json`):** the same daily Action runs `scripts/fetch_history.py`, which collects daily averages in °C for the trend chart: NASA MUR and NOAA blended at L Street (NOAA fetched in 30-day chunks, since longer requests time out), buoy 44013 and A01 (NERACOOS ERDDAP, `orderByMean("time/1day")`), and Portland ME (CO-OPS via the IOOS sensors ERDDAP). Each run fetches the last 365 days and merges them into the file, so history keeps growing (capped at about 3 years). The job commits only when a reading changes, not just the timestamp.
+
 Note: the Boston tide station `8443970` has no water temperature sensor.
 
 The **Coastal Water Temperature** table and map at the bottom list the satellite estimate at L Street (from `data/sst.json`, below), buoy `44013` (same ERDDAP feed as below) alongside the CO-OPS stations (Portland, Bar Harbor, Woods Hole, Nantucket).
@@ -138,7 +141,7 @@ If not available, the app displays `—`.
 - `seahorse.png` — logo used in the page header
 - `manifest.webmanifest`, `icon-192.png`, `icon-512.png`, `icon-maskable-512.png`, `apple-touch-icon.png` — home-screen app setup and icons (square versions of the seahorse)
 - `README.md` — this file
-- `scripts/fetch_sst.py`, `.github/workflows/satellite-sst.yml`, `data/sst.json` — daily satellite water temp fetch and its output
+- `scripts/fetch_sst.py`, `scripts/fetch_history.py`, `.github/workflows/satellite-sst.yml`, `data/sst.json`, `data/water_history.json` — daily satellite and water temperature history fetch, and their output
 - `LICENSE` — MIT License
 
 No build step. No backend. Just static hosting.
