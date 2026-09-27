@@ -124,9 +124,46 @@
     td.monoCell { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
 
     /* ---------------- Coastal Temps section (scoped) ---------------- */
+    /* ---------------- Tide calendar (heatmap) + Sundays ---------------- */
+    .secTitle { font-size:16px; font-weight:750; }
+    .seg { display:inline-flex; gap:0; border:1px solid #ddd; border-radius:10px; overflow:hidden; }
+    .seg button { border:0; border-radius:0; padding:8px 12px; background:#fff; cursor:pointer; font-size:13px; }
+    .seg button[aria-pressed="true"] { background:#111; color:#fff; }
+    .calWrap { background:#fff; border:1px solid var(--line); border-radius:12px; padding:10px; margin-top:10px; overflow-x:auto; }
+    .cal { display:grid; grid-template-columns: 78px repeat(18, minmax(13px, 1fr)); gap:2px; min-width:330px; }
+    .cal .hh { font-size:10px; color: var(--muted); text-align:center; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; line-height:14px; }
+    .cal .hh.meet { color: var(--fg); font-weight:750; }
+    .cal .day { all:unset; cursor:pointer; font-size:11px; color: var(--muted); white-space:nowrap; line-height:16px; padding-right:4px; border-radius:4px; }
+    .cal .day:hover, .cal .day:focus-visible { color: var(--fg); text-decoration: underline; }
+    .cal .day.sun { color: var(--fg); font-weight:750; }
+    .cal .day.today { color: var(--fg); }
+    .cal .day.today::before { content:"▸ "; }
+    .cal .cell { height:16px; border-radius:3px; position:relative; cursor:pointer; }
+    .cal .cell:hover { outline:2px solid #111; outline-offset:-1px; z-index:1; }
+    .cal .cell.meet { box-shadow: inset 0 0 0 2px #fff, 0 0 0 1.5px #111; z-index:1; }
+    .cal .cell.now::after { content:""; position:absolute; left:50%; top:50%; width:6px; height:6px; margin:-3px 0 0 -3px; border-radius:50%; background:#fff; box-shadow:0 0 0 1.5px #111; }
+    .calLegend { display:flex; flex-wrap:wrap; align-items:center; gap:8px 16px; margin-top:10px; font-size:12px; color: var(--muted); }
+    .calLegend .bar { width:160px; height:10px; border-radius:3px; }
+    .calLegend .ticks { display:flex; justify-content:space-between; width:160px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:11px; }
+    .calLegend .key { display:inline-flex; align-items:center; gap:6px; }
+    .calLegend .swMeet { width:14px; height:12px; border-radius:3px; background:#6da7ec; box-shadow: inset 0 0 0 2px #fff, 0 0 0 1.5px #111; }
+    .calLegend .swNow { width:14px; height:12px; border-radius:3px; background:#6da7ec; position:relative; }
+    .calLegend .swNow::after { content:""; position:absolute; left:4px; top:3px; width:6px; height:6px; border-radius:50%; background:#fff; box-shadow:0 0 0 1.5px #111; }
+    #calTip { position:fixed; z-index:9999; display:none; pointer-events:none; padding:7px 10px; border-radius:10px; background:rgba(255,255,255,0.97); border:1px solid rgba(0,0,0,0.18); box-shadow:0 8px 22px rgba(0,0,0,0.14); font-size:13px; line-height:1.3; }
+    #calTip .m { color: var(--muted); }
+    @media (max-width: 600px){
+      .cal { grid-template-columns: 50px repeat(18, minmax(12px, 1fr)); min-width:0; }
+      .cal .day .mon { display:none; }
+      .calWrap { padding:8px; }
+    }
+    #sundayTable td.num { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    #sundayTable tbody tr { cursor:pointer; }
+    #sundayTable tbody tr:hover { background:#fafafa; }
+
     #coastalTemps h2 { font-size:18px; margin:0; }
     #coastalTemps .sub { color: var(--muted); font-size:13px; margin: 6px 0 12px 0; }
     #coastalTemps .wrap { display:grid; grid-template-columns:1fr; gap:12px; }
+    #coastalTemps .wrap > * { min-width:0; }  /* let the wide table scroll inside its box */
     #coastalTemps .cardInner { background: #fff; border:1px solid var(--line); border-radius:12px; padding:10px 12px; }
     #coastalTemps .pillLite { display:inline-block; font-size:12px; padding:3px 8px; border-radius:999px; border:1px solid var(--line); background:#fff; color: var(--muted); }
     #coastalTemps .right { text-align:right; white-space:nowrap; }
@@ -219,6 +256,53 @@
   </div>
 
   <div id="hoverBox"></div>
+
+  <div class="card" id="calendarSection">
+    <div class="row" style="justify-content: space-between; align-items: center;">
+      <div>
+        <div class="secTitle">Tide calendar</div>
+        <div class="small">Hourly tide height, 05:00 → 22:00. Darker = higher water. Tap a day to open it above.</div>
+      </div>
+      <div class="seg" role="group" aria-label="Calendar range">
+        <button type="button" data-days="14">2 weeks</button>
+        <button type="button" data-days="35">5 weeks</button>
+      </div>
+    </div>
+    <div class="small" id="calStatus" style="margin-top:8px;">Loading…</div>
+    <div class="calWrap">
+      <div id="cal" class="cal" role="img" aria-label="Tide height heatmap by day and hour. The Sunday table below lists the same data for each 10:00 meet."></div>
+    </div>
+    <div class="calLegend" aria-hidden="true">
+      <div>
+        <div class="bar" id="calLegendBar"></div>
+        <div class="ticks"><span id="calLegendMin">—</span><span id="calLegendMid"></span><span id="calLegendMax">—</span></div>
+      </div>
+      <span class="key"><span class="swMeet"></span>Sunday 10:00 meet</span>
+      <span class="key"><span class="swNow"></span>Now</span>
+    </div>
+  </div>
+  <div id="calTip" role="tooltip"></div>
+
+  <div class="card" id="sundaySection">
+    <div class="secTitle">Sunday 10:00 meets</div>
+    <div class="small">Next 8 Sundays. Tap a row to open that day above.</div>
+    <div style="height:10px;"></div>
+    <div class="tableWrap">
+      <table id="sundayTable">
+        <thead>
+          <tr>
+            <th>Sunday</th>
+            <th>Tide at 10:00</th>
+            <th>Trend</th>
+            <th>% of day max high</th>
+            <th>High tides</th>
+            <th>Low tides</th>
+          </tr>
+        </thead>
+        <tbody id="sundayBody"></tbody>
+      </table>
+    </div>
+  </div>
 
   <div class="card" id="tableSection">
     <div class="row" style="justify-content: space-between;">
@@ -931,6 +1015,250 @@ function installScrub(){
   }, {passive:false});
 }
 
+/* ---------------- TIDE CALENDAR (heatmap) + SUNDAYS ---------------- */
+const CAL_FETCH_DAYS = 63;          // 9 weeks: always 8 upcoming Sundays
+const CAL_FIRST_H = 5, CAL_LAST_H = 22;
+const MEET_WEEKDAY = 0, MEET_HOUR = 10;   // Sunday 10:00
+// Sequential blue ramp (light = low water, dark = high water)
+const CAL_RAMP = ["#cde2fb","#b7d3f6","#9ec5f4","#86b6ef","#6da7ec","#5598e7","#3987e5",
+                  "#2a78d6","#256abf","#1c5cab","#184f95","#104281","#0d366b"];
+const WEEKDAY = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+const MONTH = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
+let CAL = null;   // { byKey: Map("YYYY-MM-DD HH" -> ft), hilo: [...], days: [iso...], minFt, maxFt }
+let CAL_DAYS_SHOWN = (window.innerWidth < 600) ? 14 : 35;
+
+function isoOf(d){ return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`; }
+function addDays(d, n){ const x = new Date(d); x.setDate(x.getDate() + n); return x; }
+function fmtDayLabel(d){ return `${WEEKDAY[d.getDay()]} ${d.getDate()} ${MONTH[d.getMonth()]}`; }
+// Row label: month is hidden on narrow screens (CSS) so the grid fits a phone
+function fillDayLabel(el, d){
+  el.textContent = `${WEEKDAY[d.getDay()]} ${d.getDate()}`;
+  const m = document.createElement("span");
+  m.className = "mon";
+  m.textContent = ` ${MONTH[d.getMonth()]}`;
+  el.appendChild(m);
+}
+
+function hexToRgb(h){ const n = parseInt(h.slice(1), 16); return [(n>>16)&255, (n>>8)&255, n&255]; }
+function rampColor(t){
+  t = Math.max(0, Math.min(1, t));
+  const x = t * (CAL_RAMP.length - 1), i = Math.floor(x), f = x - i;
+  const a = hexToRgb(CAL_RAMP[i]), b = hexToRgb(CAL_RAMP[Math.min(i+1, CAL_RAMP.length-1)]);
+  const c = a.map((v, k) => Math.round(v + (b[k]-v)*f));
+  return `rgb(${c[0]},${c[1]},${c[2]})`;
+}
+
+async function fetchCalendarData(){
+  const start = new Date(); start.setHours(0,0,0,0);
+  const end = addDays(start, CAL_FETCH_DAYS - 1);
+  const b = ymdCompact(isoOf(start)), e = ymdCompact(isoOf(end));
+  const cacheKey = `bid_cal_${b}_${CAL_FETCH_DAYS}_v1`;
+  try{
+    const c = sessionStorage.getItem(cacheKey);
+    if(c) return JSON.parse(c);
+  } catch(_){}
+  const base = `${NOAA_COOPS}?product=predictions&application=boston-irish-dippers&station=${TIDE_STATION}` +
+    `&begin_date=${b}&end_date=${e}%2023:59&datum=${DATUM}&time_zone=lst_ldt&units=english&format=json`;
+  const [hourly, hilo] = await Promise.all([
+    fetchJSON(`${base}&interval=h`), fetchJSON(`${base}&interval=hilo`)
+  ]);
+  if(!hourly?.predictions?.length) throw new Error("No hourly predictions returned.");
+  const data = {
+    hourly: hourly.predictions.map(p => [p.t, Number(p.v)]),
+    hilo: (hilo?.predictions || []).map(p => [p.t, Number(p.v), p.type])
+  };
+  try{ sessionStorage.setItem(cacheKey, JSON.stringify(data)); } catch(_){}
+  return data;
+}
+
+function buildCalendarModel(raw){
+  const byKey = new Map();
+  let minFt = Infinity, maxFt = -Infinity;
+  for(const [t, v] of raw.hourly){
+    const d = parseNoaaLocal(t);
+    byKey.set(`${isoOf(d)} ${pad2(d.getHours())}`, v);
+    const h = d.getHours();
+    if(h >= CAL_FIRST_H && h <= CAL_LAST_H){ minFt = Math.min(minFt, v); maxFt = Math.max(maxFt, v); }
+  }
+  const hilo = raw.hilo.map(([t, v, type]) => ({ t: parseNoaaLocal(t), vFt: v, type }));
+  const start = new Date(); start.setHours(0,0,0,0);
+  const days = [];
+  for(let i = 0; i < CAL_FETCH_DAYS; i++) days.push(addDays(start, i));
+  return { byKey, hilo, days, minFt, maxFt };
+}
+
+function tideAt(dayDate, hour){ return CAL?.byKey.get(`${isoOf(dayDate)} ${pad2(hour)}`); }
+function trendAt(dayDate, hour){
+  const v = tideAt(dayDate, hour), next = tideAt(dayDate, hour + 1), prev = tideAt(dayDate, hour - 1);
+  if(v == null) return "";
+  if(next != null) return next > v ? "rising" : "falling";
+  if(prev != null) return v > prev ? "rising" : "falling";
+  return "";
+}
+function dayHilo(dayDate){ return CAL.hilo.filter(x => isoOf(x.t) === isoOf(dayDate)); }
+
+function openDay(dayDate){
+  const iso = isoOf(dayDate);
+  const el = document.getElementById("date");
+  el.value = iso;
+  loadDate(iso);
+  document.querySelector(".plotWrap").scrollIntoView({ behavior:"smooth", block:"center" });
+}
+
+function renderCalendar(){
+  const grid = document.getElementById("cal");
+  const tip = document.getElementById("calTip");
+  grid.textContent = "";
+  if(!CAL) return;
+
+  const span = (CAL.maxFt - CAL.minFt) || 1;
+  const now = new Date();
+  const frag = document.createDocumentFragment();
+
+  // Header row: blank corner + hour labels (even hours, and the meet hour)
+  frag.appendChild(document.createElement("div"));
+  for(let h = CAL_FIRST_H; h <= CAL_LAST_H; h++){
+    const d = document.createElement("div");
+    d.className = "hh" + (h === MEET_HOUR ? " meet" : "");
+    d.textContent = (h % 2 === 0 || h === MEET_HOUR) ? pad2(h) : "";
+    frag.appendChild(d);
+  }
+
+  for(const day of CAL.days.slice(0, CAL_DAYS_SHOWN)){
+    const isSun = day.getDay() === MEET_WEEKDAY;
+    const isToday = isoOf(day) === isoOf(now);
+    const lab = document.createElement("button");
+    lab.type = "button";
+    lab.className = "day" + (isSun ? " sun" : "") + (isToday ? " today" : "");
+    if(isToday) lab.textContent = "Today"; else fillDayLabel(lab, day);
+    lab.title = `Open ${fmtDayLabel(day)}`;
+    lab.addEventListener("click", () => openDay(day));
+    frag.appendChild(lab);
+
+    for(let h = CAL_FIRST_H; h <= CAL_LAST_H; h++){
+      const v = tideAt(day, h);
+      const c = document.createElement("div");
+      c.className = "cell";
+      if(v != null) c.style.background = rampColor((v - CAL.minFt) / span);
+      else c.style.background = "#f0efec";
+      if(isSun && h === MEET_HOUR) c.classList.add("meet");
+      if(isToday && h === now.getHours()) c.classList.add("now");
+      c.dataset.day = isoOf(day); c.dataset.h = h;
+      frag.appendChild(c);
+    }
+  }
+  grid.appendChild(frag);
+
+  // One delegated tooltip + click for all cells
+  const cellInfo = (el) => {
+    const [Y, M, D] = el.dataset.day.split("-").map(Number);
+    const day = new Date(Y, M-1, D);
+    return { day, h: Number(el.dataset.h) };
+  };
+  grid.onpointermove = (e) => {
+    const el = e.target.closest(".cell");
+    if(!el){ tip.style.display = "none"; return; }
+    const { day, h } = cellInfo(el);
+    const v = tideAt(day, h);
+    tip.textContent = "";
+    const a = document.createElement("div");
+    a.style.fontWeight = "750";
+    a.textContent = `${fmtDayLabel(day)} · ${pad2(h)}:00`;
+    const b = document.createElement("div");
+    b.textContent = (v == null) ? "—" : `${v.toFixed(1)} ft (${ftToM(v).toFixed(1)} m)`;
+    const c = document.createElement("div");
+    c.className = "m";
+    c.textContent = trendAt(day, h);
+    tip.append(a, b, c);
+    tip.style.display = "block";
+    const r = tip.getBoundingClientRect();
+    let left = e.clientX + 14, top = e.clientY - r.height - 12;
+    if(left + r.width + 8 > window.innerWidth) left = e.clientX - r.width - 14;
+    if(top < 8) top = e.clientY + 16;
+    tip.style.left = `${Math.max(8, left)}px`;
+    tip.style.top = `${top}px`;
+  };
+  grid.onpointerleave = () => { tip.style.display = "none"; };
+  grid.onclick = (e) => {
+    const el = e.target.closest(".cell");
+    if(el) openDay(cellInfo(el).day);
+  };
+
+  // Legend
+  document.getElementById("calLegendBar").style.background =
+    `linear-gradient(90deg, ${CAL_RAMP.join(",")})`;
+  document.getElementById("calLegendMin").textContent = `${CAL.minFt.toFixed(0)} ft`;
+  document.getElementById("calLegendMid").textContent = `${((CAL.minFt + CAL.maxFt)/2).toFixed(0)}`;
+  document.getElementById("calLegendMax").textContent = `${CAL.maxFt.toFixed(0)} ft`;
+
+  document.querySelectorAll("#calendarSection .seg button").forEach(btn =>
+    btn.setAttribute("aria-pressed", String(Number(btn.dataset.days) === CAL_DAYS_SHOWN)));
+}
+
+function renderSundays(){
+  const body = document.getElementById("sundayBody");
+  body.textContent = "";
+  if(!CAL) return;
+  const now = new Date();
+  const sundays = CAL.days.filter(d => d.getDay() === MEET_WEEKDAY).filter(d => {
+    // Skip today's meet once it has passed
+    if(isoOf(d) !== isoOf(now)) return true;
+    return now.getHours() < MEET_HOUR + 1;
+  }).slice(0, 8);
+
+  const fmtEv = (x) => `${fmtHM(x.t)} (${x.vFt.toFixed(1)} ft)`;
+  for(const d of sundays){
+    const v = tideAt(d, MEET_HOUR);
+    const evs = dayHilo(d);
+    const highs = evs.filter(x => x.type === "H" || x.type === "HH");
+    const lows  = evs.filter(x => x.type === "L" || x.type === "LL");
+    const maxHigh = highs.length ? Math.max(...highs.map(x => x.vFt)) : null;
+    const pct = (v != null && maxHigh && maxHigh > 0) ? Math.max(0, Math.min(100, 100*v/maxHigh)) : null;
+    const trend = trendAt(d, MEET_HOUR);
+
+    const tr = document.createElement("tr");
+    const cells = [
+      [isoOf(d) === isoOf(now) ? `Today (${fmtDayLabel(d)})` : fmtDayLabel(d), ""],
+      [v == null ? "—" : `${v.toFixed(1)} ft (${ftToM(v).toFixed(1)} m)`, "num"],
+      [trend ? (trend === "rising" ? "↑ rising" : "↓ falling") : "—", ""],
+      [pct == null ? "—" : `${pct.toFixed(0)}%`, "num"],
+      [highs.length ? highs.map(fmtEv).join(" • ") : "—", "num"],
+      [lows.length ? lows.map(fmtEv).join(" • ") : "—", "num"]
+    ];
+    for(const [txt, cls] of cells){
+      const td = document.createElement("td");
+      if(cls) td.className = cls;
+      td.textContent = txt;
+      tr.appendChild(td);
+    }
+    tr.title = `Open ${fmtDayLabel(d)}`;
+    tr.addEventListener("click", () => openDay(d));
+    body.appendChild(tr);
+  }
+}
+
+async function loadCalendar(){
+  const status = document.getElementById("calStatus");
+  status.textContent = "Loading…";
+  try{
+    CAL = buildCalendarModel(await fetchCalendarData());
+    status.textContent = `NOAA predictions for Boston (${TIDE_STATION}). Color scale: ${CAL.minFt.toFixed(1)} to ${CAL.maxFt.toFixed(1)} ft.`;
+    renderCalendar();
+    renderSundays();
+  } catch(e){
+    CAL = null;
+    status.textContent = `Could not load the tide calendar from NOAA (${e.message}).`;
+  }
+}
+
+document.querySelectorAll("#calendarSection .seg button").forEach(btn => {
+  btn.addEventListener("click", () => {
+    CAL_DAYS_SHOWN = Number(btn.dataset.days);
+    renderCalendar();
+  });
+});
+
 /* ---------------- TABLE ---------------- */
 function buildTable(isoDate){
   const tbody = document.getElementById("tideTableBody");
@@ -1305,6 +1633,9 @@ async function loadDate(isoDate){
 }
 
 installScrub();
+
+// Tide calendar + Sundays: independent of the selected date; load once.
+loadCalendar();
 
 // Rain-based beach warning is "now", not tied to the selected date.
 updateBeachLine();
