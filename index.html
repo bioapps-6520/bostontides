@@ -159,6 +159,18 @@
     }
     #thermoSection .btnLink { display:inline-block; padding:9px 14px; border-radius:10px; background:#111; color:#fff; text-decoration:none; font-size:14px; }
     #thermoTable td.num { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    #sensorTable td.num { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; text-align:right; white-space:nowrap; }
+    #sensorTable td .muted { color: var(--muted); font-size:12px; }
+    #sensorTable td.num.muted { white-space:normal; font-family:inherit; color: var(--muted); font-size:12px; }
+    #sensorTable .narrowType { display:none; }
+    #sensorTable th.right { text-align:right; }
+    #sensorSection .tableWrap { max-height:none; }   /* only 7 rows: show them all */
+    @media (max-width: 600px){
+      #sensorTable { min-width:0; }
+      #sensorTable th, #sensorTable td { padding:8px 6px; font-size:13px; }
+      #sensorTable .wideOnly, #sensorTable .typeCol { display:none; }
+      #sensorTable .narrowType { display:inline; }
+    }
     #satTable td.num { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
     #satTable td:first-child { white-space:nowrap; }
     #satTable .narrowOnly { display:none; }
@@ -408,6 +420,7 @@
   </div>
 
   <!-- ================= Satellite water temp history ================= -->
+  <!-- (the in-water sensors card follows it, at the very bottom) -->
   <div class="card" id="satSection" hidden>
     <div class="secTitle">Satellite water temp at L Street</div>
     <div class="small">Daily satellite estimates for the water just off L Street, next to the offshore buoy's daily average. Estimates are 1–2 days old and less reliable right at the shore. In winter the buoy often reads about 5°F warmer than the beach.</div>
@@ -425,6 +438,27 @@
           </tr>
         </thead>
         <tbody id="satBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ================= In-water temperature sensors ================= -->
+  <div class="card" id="sensorSection">
+    <div class="secTitle">Water temperature sensors</div>
+    <div class="small">Sensors that measure the water directly (no satellite estimates), nearest to L Street first. Readings older than 24 hours are not shown.</div>
+    <div style="height:10px;"></div>
+    <div class="tableWrap">
+      <table id="sensorTable">
+        <thead>
+          <tr>
+            <th>Sensor</th>
+            <th class="typeCol">Type</th>
+            <th class="right">From L St</th>
+            <th class="right">Water</th>
+            <th class="right">As of</th>
+          </tr>
+        </thead>
+        <tbody id="sensorBody"></tbody>
       </table>
     </div>
   </div>
@@ -459,6 +493,15 @@ const THERMO_FORM_URL = "";   // e.g. https://forms.gle/...
 const THERMO_CSV_URL  = "";   // e.g. https://docs.google.com/spreadsheets/d/e/.../pub?output=csv
 const THERMO_LOG_ROWS = 10;           // rows shown in the log table
 const THERMO_CONDITIONS_MAX_DAYS = 7; // show in Conditions only if this recent
+
+// Danvers River at Beverly Pier (USGS 423223070531001): shallow tidal estuary
+// ~26 km north; may track winter shore temps better than the offshore buoy.
+// USGS Water Data OGC API (CORS-friendly). Shown only if the reading is < 24h old.
+const DANVERS_USGS_ID = "USGS-423223070531001";
+const DANVERS_LATEST =
+  "https://api.waterdata.usgs.gov/ogcapi/v0/collections/latest-continuous/items" +
+  `?f=json&monitoring_location_id=${DANVERS_USGS_ID}&parameter_code=00010`;
+const DANVERS_MAX_AGE_H = 24;
 
 // Buoy via ERDDAP (CORS-friendly)
 const ERDDAP_BASE = "https://data.neracoos.org/erddap/tabledap/NDBC_44013.json";
@@ -698,6 +741,23 @@ async function fetchSatelliteSst(){
   return { tempF: cToF(Number(src.tempC)), time: t };
 }
 
+// Danvers River water temp; shared by the Conditions line and the coastal table.
+let DANVERS_PROMISE = null;
+function fetchDanversWater(){
+  if(!DANVERS_PROMISE){
+    DANVERS_PROMISE = (async () => {
+      const j = await fetchJSON(DANVERS_LATEST);
+      const p = j?.features?.[0]?.properties;
+      const c = Number(p?.value);
+      if(!p || p.value == null || Number.isNaN(c)) return null;
+      const t = new Date(p.time);
+      if(Number.isNaN(t.getTime()) || Date.now() - t.getTime() > DANVERS_MAX_AGE_H*3600000) return null;
+      return { tempF: cToF(c), time: t };
+    })().catch(() => null);
+  }
+  return DANVERS_PROMISE;
+}
+
 // Gallops Island water temp (°F); ERDDAP answers 404 when there is no data.
 async function fetchGallopsWaterF(){
   const r = await fetch(GALLOPS_LATEST, { cache:"no-store" });
@@ -716,12 +776,13 @@ async function updateNDBCConditions(){
   el.textContent = "Loading…";
 
   try{
-    const [buoyJ, castle, gallopsF, sst, shore, ...coastal] = await Promise.all([
+    const [buoyJ, castle, gallopsF, sst, shore, danvers, ...coastal] = await Promise.all([
       fetchJSON(ERDDAP_LATEST).catch(()=>null),
       fetchCastleIsland().catch(()=>null),
       fetchGallopsWaterF().catch(()=>null),
       fetchSatelliteSst().catch(()=>null),
       latestShoreReading().catch(()=>null),
+      fetchDanversWater(),
       ...COASTAL_TEMP_STATIONS.map(st => fetchCOOPSLatestWaterTempF(st.id).catch(()=>null))
     ]);
 
@@ -735,6 +796,12 @@ async function updateNDBCConditions(){
       const d = sst.time;
       harborLines.push(`Water, satellite at L St (est. ${WEEKDAY[d.getDay()]} ${d.getDate()} ${MONTH[d.getMonth()]}): ` +
         `${sst.tempF.toFixed(1)}°F (${fToC(sst.tempF).toFixed(1)}°C)`);
+    }
+
+    // Danvers River estuary (USGS), shallow near-shore water north of Boston
+    if(danvers){
+      harborLines.push(`Water, Danvers River estuary (Beverly): ` +
+        `${danvers.tempF.toFixed(1)}°F (${fToC(danvers.tempF).toFixed(1)}°C)`);
     }
 
     // Castle Island wind + air (closest to the beaches)
@@ -812,6 +879,134 @@ async function updateNDBCConditions(){
   } catch(e){
     el.textContent = "—";
   }
+}
+
+/* ---------------- IN-WATER SENSORS TABLE ---------------- */
+const NERACOOS_TABLEDAP = "https://data.neracoos.org/erddap/tabledap";
+const L_STREET = { lat: 42.332, lon: -71.030 };
+const WATER_SENSORS = [
+  { name:"Gallops Island tide gauge", sub:"Stone Living Lab", type:"Harbor",
+    lat:42.3246, lon:-70.9392, src:"erddap", ds:"SLL-2699", v:"water_temperature", unit:"F",
+    home:"https://www.stonelivinglab.org/", pendingNote:"not reporting yet" },
+  { name:"Fresh Pond buoy", sub:"USGS 422303071084301", type:"Lake (reservoir)",
+    lat:42.3842, lon:-71.1453, src:"usgs", id:"USGS-422303071084301",
+    home:"https://waterdata.usgs.gov/monitoring-location/USGS-422303071084301/" },
+  { name:"Danvers River at Beverly Pier", sub:"USGS 423223070531001", type:"Estuary",
+    lat:42.53975, lon:-70.88615, src:"usgs", id:DANVERS_USGS_ID,
+    home:"https://waterdata.usgs.gov/monitoring-location/USGS-423223070531001/" },
+  { name:"Buoy 44013", sub:"16 NM E of Boston", type:"Offshore",
+    lat:42.346, lon:-70.651, src:"erddap", ds:"NDBC_44013", v:"WTMP", unit:"C",
+    home:"https://www.ndbc.noaa.gov/station_page.php?station=44013" },
+  { name:"Buoy A01", sub:"Mass Bay, NERACOOS, 1 m depth", type:"Offshore",
+    lat:42.5183, lon:-70.5681, src:"erddap", ds:"A01_ocean_001m", v:"temperature", unit:"C",
+    home:"https://mariners.neracoos.org/platform/A01" },
+  { name:"Buoy 44090", sub:"Cape Cod Bay", type:"Bay",
+    lat:41.84, lon:-70.329, src:"erddap", ds:"NDBC_44090", v:"WTMP", unit:"C",
+    home:"https://www.ndbc.noaa.gov/station_page.php?station=44090" },
+  { name:"Portland Harbor, ME", sub:"NOAA 8418150", type:"Coastal",
+    lat:43.6567, lon:-70.2467, src:"coops", id:"8418150",
+    home:"https://tidesandcurrents.noaa.gov/stationhome.html?id=8418150" }
+];
+const SENSOR_MAX_AGE_H = 24;
+
+function kmBetween(a, b){
+  const R = 6371, r = Math.PI/180;
+  const dLat = (b.lat - a.lat)*r, dLon = (b.lon - a.lon)*r;
+  const h = Math.sin(dLat/2)**2 + Math.cos(a.lat*r)*Math.cos(b.lat*r)*Math.sin(dLon/2)**2;
+  return 2*R*Math.asin(Math.sqrt(h));
+}
+
+// Latest reading as { tempF, time } or null (no data / too old / error)
+async function fetchSensorLatest(sn){
+  let tempF = null, time = null;
+  if(sn.src === "erddap"){
+    const url = `${NERACOOS_TABLEDAP}/${sn.ds}.json?time,${sn.v}` +
+      `&time%3E=now-1day&${sn.v}!=NaN&orderByMax(%22time%22)`;
+    const r = await fetch(url, { cache:"no-store" });
+    if(r.status === 404) return null;           // ERDDAP: no matching data
+    if(!r.ok) throw new Error(`HTTP ${r.status}`);
+    const t = (await r.json())?.table;
+    const row = t?.rows?.[0];
+    if(!row) return null;
+    const v = Number(row[t.columnNames.indexOf(sn.v)]);
+    if(Number.isNaN(v)) return null;
+    tempF = (sn.unit === "C") ? cToF(v) : v;
+    time = new Date(row[t.columnNames.indexOf("time")]);
+  } else if(sn.src === "usgs"){
+    if(sn.id === DANVERS_USGS_ID){
+      const d = await fetchDanversWater();      // shared with the Conditions line
+      return d ? { tempF: d.tempF, time: d.time } : null;
+    }
+    const j = await fetchJSON(
+      "https://api.waterdata.usgs.gov/ogcapi/v0/collections/latest-continuous/items" +
+      `?f=json&monitoring_location_id=${sn.id}&parameter_code=00010`);
+    const p = j?.features?.[0]?.properties;
+    const c = Number(p?.value);
+    if(!p || p.value == null || Number.isNaN(c)) return null;
+    tempF = cToF(c); time = new Date(p.time);
+  } else if(sn.src === "coops"){
+    const w = await fetchCoopsLatest(sn.id, "water_temperature", "english");
+    if(!w) return null;
+    tempF = w.v; time = w.t ? parseNoaaLocal(w.t) : null;
+  }
+  if(!time || Number.isNaN(time.getTime())) return null;
+  if(Date.now() - time.getTime() > SENSOR_MAX_AGE_H*3600000) return null;
+  return { tempF, time };
+}
+
+async function renderWaterSensors(){
+  const body = document.getElementById("sensorBody");
+  body.textContent = "";
+  const list = WATER_SENSORS
+    .map(sn => ({ ...sn, km: kmBetween(L_STREET, sn) }))
+    .sort((a, b) => a.km - b.km);
+  const results = await Promise.all(list.map(sn => fetchSensorLatest(sn).catch(() => null)));
+  list.forEach((sn, i) => {
+    const r = results[i];
+    const tr = document.createElement("tr");
+
+    const tdName = document.createElement("td");
+    const a = document.createElement("a");
+    a.href = sn.home; a.target = "_blank"; a.rel = "noopener";
+    a.textContent = sn.name;
+    const sub = document.createElement("div");
+    sub.className = "muted";
+    sub.textContent = sn.sub;
+    tdName.append(a, sub);
+
+    const tdType = document.createElement("td");
+    tdType.className = "typeCol";
+    tdType.textContent = sn.type;
+    // Phones hide the Type column, so show the type under the name there instead
+    const typeTag = document.createElement("span");
+    typeTag.className = "narrowType";
+    typeTag.textContent = `${sn.type} · `;
+    sub.prepend(typeTag);
+
+    const tdKm = document.createElement("td");
+    tdKm.className = "num";
+    tdKm.textContent = `${sn.km.toFixed(0)} km`;
+
+    const tdTemp = document.createElement("td");
+    tdTemp.className = "num";
+    const tdAsOf = document.createElement("td");
+    tdAsOf.className = "num";
+    if(r){
+      tdTemp.textContent = `${r.tempF.toFixed(1)}°F`;
+      const c = document.createElement("span");
+      c.className = "wideOnly";
+      c.textContent = ` (${fToC(r.tempF).toFixed(1)}°C)`;
+      tdTemp.appendChild(c);
+      tdAsOf.textContent = fmtHM(r.time) + (isoOf(r.time) === isoOf(new Date()) ? "" :
+        ` ${WEEKDAY[r.time.getDay()]}`);
+    } else {
+      tdTemp.textContent = "—";
+      tdAsOf.textContent = sn.pendingNote || "no recent reading";
+      tdAsOf.classList.add("muted");
+    }
+    tr.append(tdName, tdType, tdKm, tdTemp, tdAsOf);
+    body.appendChild(tr);
+  });
 }
 
 /* ---------------- SATELLITE HISTORY TABLE ---------------- */
@@ -1985,6 +2180,9 @@ loadCalendar();
 
 // Satellite history table at the bottom (hidden if data/sst.json has none)
 renderSatelliteHistory();
+
+// In-water sensors table (very bottom)
+renderWaterSensors();
 
 // Shore thermometer log (hidden until THERMO_CSV_URL is set)
 renderThermoLog();
