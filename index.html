@@ -171,6 +171,18 @@
       #sensorTable .wideOnly, #sensorTable .typeCol { display:none; }
       #sensorTable .narrowType { display:inline; }
     }
+    .trendWrap { background:#fff; border:1px solid var(--line); border-radius:12px; margin-top:10px; overflow:hidden; }
+    #trendPlot { width:100%; height:340px; }
+    #trendTable td.num { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; text-align:right; white-space:nowrap; }
+    #trendTable th.right { text-align:right; }
+    #trendTable .swatch { display:inline-block; width:14px; height:3px; border-radius:2px; vertical-align:middle; margin-right:8px; }
+    #trendTable .swatch.dot { width:8px; height:8px; border-radius:50%; }
+    @media (max-width: 600px){
+      #trendPlot { height:300px; }
+      #trendTable { min-width:0; }
+      #trendTable th, #trendTable td { padding:8px 6px; font-size:13px; }
+      #trendTable .wideOnly, #trendTable .wideOnlyCol { display:none; }
+    }
     #satTable td.num { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
     #satTable td:first-child, #satSitesTable td:first-child { white-space:nowrap; }
     #satSitesTable td.num { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
@@ -388,6 +400,37 @@
           </tr>
         </thead>
         <tbody id="tideTableBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ================= Water temperature trend ================= -->
+  <div class="card" id="trendSection" hidden>
+    <div class="row" style="justify-content: space-between; align-items: center;">
+      <div>
+        <div class="secTitle">Water temperature trend</div>
+        <div class="small">Daily averages. Tap a source in the table (or legend) to hide or show its line.</div>
+      </div>
+      <div class="seg" role="group" aria-label="Trend range">
+        <button type="button" data-tdays="7">1W</button>
+        <button type="button" data-tdays="14">2W</button>
+        <button type="button" data-tdays="35">5W</button>
+        <button type="button" data-tdays="91">3M</button>
+        <button type="button" data-tdays="365">1Y</button>
+      </div>
+    </div>
+    <div class="trendWrap"><div id="trendPlot" aria-label="Water temperature trend chart"></div></div>
+    <div class="tableWrap" style="margin-top:10px;">
+      <table id="trendTable">
+        <thead>
+          <tr>
+            <th>Source</th>
+            <th class="right">Latest</th>
+            <th class="right">Change<span class="wideOnly"> over range</span></th>
+            <th class="right wideOnlyCol">Low – high</th>
+          </tr>
+        </thead>
+        <tbody id="trendBody"></tbody>
       </table>
     </div>
   </div>
@@ -1031,6 +1074,163 @@ async function renderWaterSensors(){
     body.appendChild(tr);
   });
 }
+
+/* ---------------- WATER TEMPERATURE TREND (chart) ---------------- */
+// data/water_history.json is written daily by the GitHub Action
+// (scripts/fetch_history.py): daily °C per source for up to ~3 years.
+// Categorical palette slots 1-5 in fixed order (validated for adjacent lines).
+const TREND_COLORS = {
+  sat_mur_lst:     "#2a78d6",   // 1 blue
+  sat_blended_lst: "#eb6834",   // 2 orange
+  buoy44013:       "#1baf7a",   // 3 aqua
+  a01:             "#eda100",   // 4 yellow
+  portland:        "#e87ba4"    // 5 magenta
+};
+let TREND = null;          // { series:[{key,name,color,pts:[{d:Date,f:°F}]}], thermo:[...] }
+let TREND_DAYS = 35;
+const TREND_HIDDEN = new Set();   // names of lines the reader switched off
+
+function trendRangeStart(days){
+  const t = new Date(); t.setHours(0,0,0,0); t.setDate(t.getDate() - days + 1);
+  return t;
+}
+function fmtDelta(f){
+  if(f == null) return "—";
+  return Math.abs(f) < 0.05 ? "0.0°F" : `${f > 0 ? "+" : "−"}${Math.abs(f).toFixed(1)}°F`;
+}
+
+async function loadTrend(){
+  const sec = document.getElementById("trendSection");
+  let j = null;
+  try{
+    const r = await fetch("data/water_history.json", { cache:"no-store" });
+    if(r.ok) j = await r.json();
+  } catch(_){}
+  if(!j?.series?.length) return;           // keep hidden
+  const series = j.series.map(s => ({
+    key: s.key, name: s.name, color: TREND_COLORS[s.key] || "#666",
+    pts: (s.data || []).map(([d, c]) => {
+      const [Y, M, D] = d.split("-").map(Number);
+      return { d: new Date(Y, M-1, D, 12), f: cToF(c) };
+    })
+  })).filter(s => s.pts.length);
+  // Club thermometer readings (if the form is set up) as black dots
+  let thermo = [];
+  try{ thermo = (await loadThermoReadings()) || []; } catch(_){}
+  TREND = { series, thermo };
+  sec.hidden = false;
+  renderTrend();
+}
+
+function renderTrend(){
+  if(!TREND) return;
+  const start = trendRangeStart(TREND_DAYS);
+  const end = new Date(); end.setHours(23,59,0,0);
+  const inRange = (p) => p.d >= start && p.d <= end;
+
+  const traces = TREND.series.map(s => ({
+    x: s.pts.map(p => p.d), y: s.pts.map(p => +p.f.toFixed(1)),
+    type: "scatter", mode: "lines", name: s.name,
+    line: { color: s.color, width: 2 },
+    visible: TREND_HIDDEN.has(s.name) ? "legendonly" : true,
+    hovertemplate: "%{y:.1f}°F<extra>" + s.name.replace(/[<>&]/g, "") + "</extra>"
+  }));
+  if(TREND.thermo.length){
+    traces.push({
+      x: TREND.thermo.map(r => r.t), y: TREND.thermo.map(r => +r.f.toFixed(1)),
+      type: "scatter", mode: "markers", name: "Club thermometer (beach)",
+      marker: { color: "#111", size: 8, line: { color: "#fff", width: 2 } },
+      visible: TREND_HIDDEN.has("Club thermometer (beach)") ? "legendonly" : true,
+      hovertemplate: "%{y:.1f}°F<extra>Club thermometer</extra>"
+    });
+  }
+
+  // y range from the data visible in the selected window
+  const vis = [];
+  for(const s of TREND.series) for(const p of s.pts) if(inRange(p)) vis.push(p.f);
+  for(const r of TREND.thermo) if(r.t >= start && r.t <= end) vis.push(r.f);
+  const lo = vis.length ? Math.min(...vis) : 30, hi = vis.length ? Math.max(...vis) : 80;
+  const pad = Math.max(1, (hi - lo) * 0.12);
+
+  Plotly.newPlot("trendPlot", traces, {
+    margin: { l: 48, r: 12, t: 8, b: 40 },
+    xaxis: { type: "date", range: [start, end], fixedrange: true,
+             tickformat: TREND_DAYS <= 35 ? "%d %b" : "%b", gridcolor: "#eee" },
+    yaxis: { title: { text: "°F" }, range: [lo - pad, hi + pad], fixedrange: true, gridcolor: "#eee" },
+    hovermode: "x unified",
+    legend: { orientation: "h", y: -0.18, x: 0, font: { size: 12 } },
+    // Phones: the table below (with color swatches) is the legend, so the plot keeps its height
+    showlegend: window.innerWidth >= 600, dragmode: false,
+    plot_bgcolor: "#fff", paper_bgcolor: "#fff"
+  }, { responsive: true, displayModeBar: false, displaylogo: false, scrollZoom: false });
+
+  // Keep TREND_HIDDEN in sync when the Plotly legend is used
+  const plotEl = document.getElementById("trendPlot");
+  plotEl.removeAllListeners?.("plotly_restyle");
+  plotEl.on("plotly_restyle", () => {
+    TREND_HIDDEN.clear();
+    for(const t of plotEl.data) if(t.visible === "legendonly") TREND_HIDDEN.add(t.name);
+    syncTrendRows();
+  });
+
+  // Table view: latest value, change over the window, low-high
+  const body = document.getElementById("trendBody");
+  body.textContent = "";
+  const rows = TREND.series.map(s => ({ name: s.name, color: s.color, pts: s.pts.filter(inRange), dot:false }));
+  if(TREND.thermo.length){
+    rows.push({ name: "Club thermometer (beach)", color: "#111", dot: true,
+      pts: TREND.thermo.filter(r => r.t >= start && r.t <= end).map(r => ({ d: r.t, f: r.f }))
+                       .sort((a, b) => a.d - b.d) });
+  }
+  for(const r of rows){
+    const tr = document.createElement("tr");
+    const name = document.createElement("td");
+    const sw = document.createElement("span");
+    sw.className = "swatch" + (r.dot ? " dot" : "");
+    sw.style.background = r.color;
+    name.append(sw, document.createTextNode(r.name));
+    const last = r.pts[r.pts.length - 1], first = r.pts[0];
+    const cells = [
+      last ? `${last.f.toFixed(1)}°F` : "—",
+      (last && first && r.pts.length > 1) ? fmtDelta(last.f - first.f) : "—",
+      r.pts.length ? `${Math.min(...r.pts.map(p => p.f)).toFixed(1)} – ${Math.max(...r.pts.map(p => p.f)).toFixed(1)}°F` : "—"
+    ];
+    tr.dataset.name = r.name;
+    tr.style.cursor = "pointer";
+    tr.title = "Tap to hide or show this line";
+    tr.addEventListener("click", () => {
+      if(TREND_HIDDEN.has(r.name)) TREND_HIDDEN.delete(r.name); else TREND_HIDDEN.add(r.name);
+      const idx = plotEl.data.findIndex(t => t.name === r.name);
+      if(idx >= 0) Plotly.restyle(plotEl, { visible: TREND_HIDDEN.has(r.name) ? "legendonly" : true }, [idx]);
+      syncTrendRows();
+    });
+    tr.appendChild(name);
+    cells.forEach((txt, i) => {
+      const td = document.createElement("td");
+      td.className = "num" + (i === 2 ? " wideOnlyCol" : "");
+      td.textContent = txt;
+      tr.appendChild(td);
+    });
+    body.appendChild(tr);
+  }
+
+  syncTrendRows();
+  document.querySelectorAll("#trendSection .seg button").forEach(b =>
+    b.setAttribute("aria-pressed", String(Number(b.dataset.tdays) === TREND_DAYS)));
+}
+
+// Dim table rows whose line is hidden
+function syncTrendRows(){
+  document.querySelectorAll("#trendBody tr").forEach(tr => {
+    const off = TREND_HIDDEN.has(tr.dataset.name);
+    tr.style.opacity = off ? "0.4" : "";
+    tr.setAttribute("aria-pressed", String(!off));
+  });
+}
+
+document.querySelectorAll("#trendSection .seg button").forEach(b => {
+  b.addEventListener("click", () => { TREND_DAYS = Number(b.dataset.tdays); renderTrend(); });
+});
 
 /* ---------------- SATELLITE HISTORY TABLE ---------------- */
 async function renderSatelliteHistory(){
@@ -2325,6 +2525,9 @@ installScrub();
 
 // Tide calendar + Sundays: independent of the selected date; load once.
 loadCalendar();
+
+// Water temperature trend chart (hidden if data/water_history.json is missing)
+loadTrend();
 
 // Satellite history table at the bottom (hidden if data/sst.json has none)
 renderSatelliteHistory();

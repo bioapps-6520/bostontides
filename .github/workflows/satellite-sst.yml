@@ -1,8 +1,9 @@
 name: Satellite water temp (L Street)
 
 # Daily: fetch satellite sea-surface temperature near L Street Beach into
-# data/sst.json. The satellite servers don't allow browser (CORS) access,
-# so the page reads this file from the site instead.
+# data/sst.json, and daily water temperature history for the trend chart into
+# data/water_history.json. The satellite servers don't allow browser (CORS)
+# access, so the page reads these files from the site instead.
 on:
   schedule:
     - cron: "23 11 * * *"   # 11:23 UTC = 07:23 EDT / 06:23 EST
@@ -25,20 +26,44 @@ jobs:
       - name: Fetch satellite SST
         run: python3 scripts/fetch_sst.py
 
+      - name: Fetch water temperature history
+        # A failure here must not block the satellite update above.
+        run: python3 scripts/fetch_history.py || echo "history fetch failed; keeping the previous file"
+
       - name: Commit if changed
         id: commit
         run: |
-          # Only the satellite readings matter; ignore the "updated" stamp.
-          if git diff --quiet -- data/sst.json || [ -z "$(git diff -U0 -- data/sst.json | grep -E '^[+-] ' | grep -v '"updated"')" ]; then
-            git checkout -- data/sst.json 2>/dev/null || true
+          # Only the readings matter: compare each file with the committed copy
+          # ignoring the top-level "updated" timestamp.
+          changed=$(python3 - <<'PY'
+          import json, subprocess
+          out = []
+          for f in ("data/sst.json", "data/water_history.json"):
+              try:
+                  new = json.load(open(f))
+              except Exception:
+                  continue
+              try:
+                  old = json.loads(subprocess.run(["git", "show", f"HEAD:{f}"],
+                                   capture_output=True, text=True, check=True).stdout)
+              except Exception:
+                  old = None          # new file
+              if old is None or {k: v for k, v in new.items() if k != "updated"} != \
+                                {k: v for k, v in old.items() if k != "updated"}:
+                  out.append(f)
+          print(" ".join(out))
+          PY
+          )
+          if [ -z "$changed" ]; then
+            git checkout -- data/ 2>/dev/null || true
             echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "No new satellite data."
+            echo "No new data."
             exit 0
           fi
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/sst.json
-          git commit -m "Update satellite water temp (data/sst.json)"
+          git add $changed
+          git commit -m "Update water temperature data ($changed)"
           git push
           echo "changed=true" >> "$GITHUB_OUTPUT"
 
