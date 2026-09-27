@@ -994,6 +994,16 @@ function buildTable(isoDate){
 /* labelOffsetPx nudges the label boxes to avoid overlap */
 const coastalStations = [
   {
+    id:"44013",
+    name:"Offshore buoy, 16 NM E of Boston",
+    short:"Buoy 44013",
+    lat:42.346,
+    lon:-70.651,
+    home:"https://www.ndbc.noaa.gov/station_page.php?station=44013",
+    source:"ndbc",   // read via NERACOOS ERDDAP, not CO-OPS
+    labelOffsetPx: { x: 0, y: 0 }
+  },
+  {
     id:"8418150",
     name:"Portland Harbor, ME",
     short:"Portland",
@@ -1133,17 +1143,34 @@ async function loadCoastalTemps(){
 
   const rows = [];
   for(const st of coastalStations){
-    const data = { waterF:null, airF:null, asOf:"—" };
+    const data = { waterF:null, airF:null, asOf:null }; // asOf: Date
+
+    if(st.source === "ndbc"){
+      try{
+        const j = await fetchJSON(ERDDAP_LATEST);
+        const names = j?.table?.columnNames || [];
+        const row = j?.table?.rows?.[0] || [];
+        const get = (col) => { const v = row[names.indexOf(col)]; return (v == null || Number.isNaN(Number(v))) ? null : Number(v); };
+        const wC = get("WTMP"), aC = get("ATMP");
+        if(wC != null) data.waterF = cToF(wC);
+        if(aC != null) data.airF = cToF(aC);
+        const t = row[names.indexOf("time")];
+        if(t) data.asOf = new Date(t); // ISO UTC
+      } catch(_) {}
+      rows.push({ st, data });
+      upsertMarker(st, data.waterF);
+      continue;
+    }
 
     try{
       const w = await fetchCoopsLatest(st.id, "water_temperature", "english");
-      if(w){ data.waterF = w.v; data.asOf = w.t || data.asOf; }
+      if(w){ data.waterF = w.v; if(w.t) data.asOf = parseNoaaLocal(w.t); }
     } catch(_) {}
 
     // Optional: Air temperature
     try{
       const a = await fetchCoopsLatest(st.id, "air_temperature", "english");
-      if(a){ data.airF = a.v; if(data.asOf === "—") data.asOf = a.t || data.asOf; }
+      if(a){ data.airF = a.v; if(!data.asOf && a.t) data.asOf = parseNoaaLocal(a.t); }
     } catch(_) {}
 
     rows.push({ st, data });
@@ -1153,7 +1180,7 @@ async function loadCoastalTemps(){
   tbody.innerHTML = rows.map(({st, data}) => {
     const waterTxt = fmtTempFC(data.waterF);
     const airTxt = (data.airF == null) ? "—" : fmtTempFC(data.airF);
-    const asOf = (data.asOf && data.asOf !== "—") ? fmtLocal(parseNoaaLocal(data.asOf)) : "—";
+    const asOf = data.asOf ? fmtLocal(data.asOf) : "—";
 
     return `
       <tr data-home="${st.home}" title="Open station page">

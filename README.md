@@ -76,6 +76,8 @@ Example parameters used:
 
 Note: the Boston tide station `8443970` has no water temperature sensor.
 
+The **Coastal Water Temperature** table and map at the bottom list buoy `44013` (same ERDDAP feed as below) alongside the CO-OPS stations (Portland, Bar Harbor, Woods Hole, Nantucket).
+
 ---
 
 ### 3) Offshore water temp / wind / air temp (NDBC buoy via ERDDAP)
