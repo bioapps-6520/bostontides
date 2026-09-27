@@ -602,6 +602,20 @@ async function fetchCastleIsland(){
            asOf: t ? parseNoaaLocal(t) : null };
 }
 
+// Satellite water temp off L Street, written daily by a GitHub Action
+// (.github/workflows/satellite-sst.yml) into data/sst.json on this site.
+const SST_MAX_AGE_DAYS = 5;
+async function fetchSatelliteSst(){
+  const r = await fetch("data/sst.json", { cache:"no-store" });
+  if(!r.ok) return null;
+  const j = await r.json();
+  const src = (j?.sources || []).find(x => x.key === "blended") || j?.sources?.[0];
+  if(!src || src.tempC == null) return null;
+  const t = new Date(src.time);
+  if(Number.isNaN(t.getTime()) || (Date.now() - t.getTime()) > SST_MAX_AGE_DAYS*86400000) return null;
+  return { tempF: cToF(Number(src.tempC)), time: t };
+}
+
 // Gallops Island water temp (°F); ERDDAP answers 404 when there is no data.
 async function fetchGallopsWaterF(){
   const r = await fetch(GALLOPS_LATEST, { cache:"no-store" });
@@ -620,10 +634,11 @@ async function updateNDBCConditions(){
   el.textContent = "Loading…";
 
   try{
-    const [buoyJ, castle, gallopsF, ...coastal] = await Promise.all([
+    const [buoyJ, castle, gallopsF, sst, ...coastal] = await Promise.all([
       fetchJSON(ERDDAP_LATEST).catch(()=>null),
       fetchCastleIsland().catch(()=>null),
       fetchGallopsWaterF().catch(()=>null),
+      fetchSatelliteSst().catch(()=>null),
       ...COASTAL_TEMP_STATIONS.map(st => fetchCOOPSLatestWaterTempF(st.id).catch(()=>null))
     ]);
 
@@ -631,6 +646,13 @@ async function updateNDBCConditions(){
     const harborLines = (gallopsF != null)
       ? [`Harbor water (Gallops Is.): ${gallopsF.toFixed(1)}°F (${fToC(gallopsF).toFixed(1)}°C)`]
       : [];
+
+    // Satellite estimate right off L Street (daily, 1-2 days old)
+    if(sst){
+      const d = sst.time;
+      harborLines.push(`Satellite at L St (est. ${WEEKDAY[d.getDay()]} ${d.getDate()} ${MONTH[d.getMonth()]}): ` +
+        `${sst.tempF.toFixed(1)}°F (${fToC(sst.tempF).toFixed(1)}°C)`);
+    }
 
     // Castle Island wind + air (closest to the beaches)
     let castleLine = "Castle Island: —";

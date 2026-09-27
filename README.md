@@ -75,6 +75,8 @@ Example parameters used:
 
 **Portland, ME `8418150` (CO-OPS)** `water_temperature`, `date=latest`. In winter, Portland has tracked Boston beach temperatures more closely than the offshore buoy, which can read 5°F or more warmer.
 
+**Satellite water temp at L Street (trial):** a daily GitHub Action (`.github/workflows/satellite-sst.yml`) runs `scripts/fetch_sst.py`, which reads satellite sea-surface temperature for the water just off L Street and commits it to `data/sst.json`. The satellite ERDDAP servers don't allow browser (CORS) access, so the page reads that file from the site instead. It uses NOAA CoastWatch blended SST (`noaacwBLENDEDsstDaily`, ~5 km, preferred) and NASA JPL MUR SST (`jplMURSST41`, ~1 km). It's an estimate, 1–2 days old, and less reliable right at the shoreline, so compare it with your thermometer over the winter. The line is hidden if the reading is more than 5 days old. To refresh on demand, go to **Actions → Satellite water temp (L Street) → Run workflow**.
+
 Note: the Boston tide station `8443970` has no water temperature sensor.
 
 The **Coastal Water Temperature** table and map at the bottom list buoy `44013` (same ERDDAP feed as below) alongside the CO-OPS stations (Portland, Bar Harbor, Woods Hole, Nantucket).
@@ -132,6 +134,7 @@ If not available, the app displays `—`.
 - `seahorse.png` — logo used in the page header
 - `manifest.webmanifest`, `icon-192.png`, `icon-512.png`, `icon-maskable-512.png`, `apple-touch-icon.png` — home-screen app setup and icons (square versions of the seahorse)
 - `README.md` — this file
+- `scripts/fetch_sst.py`, `.github/workflows/satellite-sst.yml`, `data/sst.json` — daily satellite water temp fetch and its output
 - `LICENSE` — MIT License
 
 No build step. No backend. Just static hosting.

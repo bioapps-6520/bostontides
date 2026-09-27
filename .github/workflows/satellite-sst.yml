@@ -1,0 +1,50 @@
+name: Satellite water temp (L Street)
+
+# Daily: fetch satellite sea-surface temperature near L Street Beach into
+# data/sst.json. The satellite servers don't allow browser (CORS) access,
+# so the page reads this file from the site instead.
+on:
+  schedule:
+    - cron: "23 11 * * *"   # 11:23 UTC = 07:23 EDT / 06:23 EST
+  workflow_dispatch: {}
+
+permissions:
+  contents: write   # commit data/sst.json
+  pages: write      # request a Pages rebuild after the commit
+
+concurrency:
+  group: satellite-sst
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch satellite SST
+        run: python3 scripts/fetch_sst.py
+
+      - name: Commit if changed
+        id: commit
+        run: |
+          # Only the satellite readings matter; ignore the "updated" stamp.
+          if git diff --quiet -- data/sst.json || [ -z "$(git diff -U0 -- data/sst.json | grep -E '^[+-] ' | grep -v '"updated"')" ]; then
+            git checkout -- data/sst.json 2>/dev/null || true
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No new satellite data."
+            exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/sst.json
+          git commit -m "Update satellite water temp (data/sst.json)"
+          git push
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      # Pushes made with GITHUB_TOKEN may not start a Pages build on their own.
+      - name: Request Pages build
+        if: steps.commit.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh api -X POST "repos/${{ github.repository }}/pages/builds" || echo "Pages build request failed; the next push will publish it."
