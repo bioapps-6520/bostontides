@@ -742,6 +742,9 @@ async function updateNDBCConditions(){
     if(castle){
       const parts = [];
       if(castle.airF != null) parts.push(`${castle.airF.toFixed(1)}°F (${fToC(castle.airF).toFixed(1)}°C)`);
+      // NWS wind chill from the measured air + wind (only defined at <= 50°F, wind > 3 mph)
+      const wc = windChillF(castle.airF, castle.windMph);
+      if(wc != null) parts.push(`feels like ${wc.toFixed(0)}°F (${fToC(wc).toFixed(0)}°C)`);
       if(castle.windMph != null){
         let w = `wind ${castle.windMph.toFixed(0)} mph${castle.dir ? " " + castle.dir : ""}`;
         if(castle.gustMph != null) w += `, gusts ${castle.gustMph.toFixed(0)}`;
@@ -972,19 +975,29 @@ async function getNWSData(){
   if(NWS_CACHE && (now - NWS_CACHE.fetchedAtMs) < 15*60*1000) return NWS_CACHE;
 
   const headers = { "Accept": "application/geo+json" };
-  const point = await fetchJSON(`https://api.weather.gov/points/${NWS_LAT},${NWS_LON}`, headers);
+  // weather.gov has brief outages (500/503): retry once after a short pause.
+  const getNws = async (url) => {
+    try{ return await fetchJSON(url, headers); }
+    catch(_){ await new Promise(r => setTimeout(r, 1500)); return await fetchJSON(url, headers); }
+  };
+  const point = await getNws(`https://api.weather.gov/points/${NWS_LAT},${NWS_LON}`);
 
   const dailyUrl  = point?.properties?.forecast;
   const hourlyUrl = point?.properties?.forecastHourly;
-  if(!dailyUrl || !hourlyUrl) throw new Error("NWS forecast URLs missing.");
+  if(!dailyUrl && !hourlyUrl) throw new Error("NWS forecast URLs missing.");
 
+  // Use whichever of daily / hourly answers; fail only if both fail.
   const [daily, hourly] = await Promise.all([
-    fetchJSON(dailyUrl, headers),
-    fetchJSON(hourlyUrl, headers)
+    dailyUrl  ? getNws(dailyUrl).catch(() => null)  : null,
+    hourlyUrl ? getNws(hourlyUrl).catch(() => null) : null
   ]);
+  if(!daily && !hourly) throw new Error("weather.gov did not respond");
 
   const dailyPeriods  = daily?.properties?.periods || [];
-  const hourlyPeriods = hourly?.properties?.periods || [];
+  // Drop hours that already ended (the API sometimes serves a slightly old copy)
+  const nowMs = Date.now();
+  const hourlyPeriods = (hourly?.properties?.periods || [])
+    .filter(p => !p?.endTime || new Date(p.endTime).getTime() > nowMs);
 
   NWS_CACHE = { dailyPeriods, hourlyPeriods, fetchedAtMs: now };
   return NWS_CACHE;
@@ -997,8 +1010,12 @@ async function updateNWSForecast(selectedISO){
   el.textContent = "Loading…";
 
   const delta = daysBetweenISO(todayISO(), selectedISO);
-  if(delta < 0 || delta > 7){
-    el.textContent = "—";
+  if(delta < 0){
+    el.textContent = "No forecast for past dates.";
+    return;
+  }
+  if(delta > 7){
+    el.textContent = "No forecast: NWS only covers the next 7 days.";
     return;
   }
 
@@ -1006,16 +1023,14 @@ async function updateNWSForecast(selectedISO){
     const { dailyPeriods, hourlyPeriods } = await getNWSData();
     if(seq !== NWS_SEQ) return; // a newer date was picked while we waited
 
-    if(selectedISO === todayISO()){
+    // Today: next 12 hours from the hourly forecast (falls back to the daily one)
+    if(selectedISO === todayISO() && hourlyPeriods.length){
       const next = hourlyPeriods.slice(0, 12);
-      if(!next.length){ el.textContent = "—"; return; }
       const nowP = next[0];
 
       const pops = next.map(p => p?.probabilityOfPrecipitation?.value).filter(v => v!=null);
       const maxPop = pops.length ? Math.max(...pops) : null;
 
-      const skies = next.map(p => p?.skyCover?.value).filter(v => v!=null);
-      const avgSky = skies.length ? skies.reduce((a,b)=>a+b,0)/skies.length : null;
 
       const snowish = next.some(p => {
         const s = (p?.shortForecast || "").toLowerCase();
@@ -1030,7 +1045,6 @@ async function updateNWSForecast(selectedISO){
       if(feels) parts.push(feels);
       parts.push(`Max precip (12h): ${maxPop!=null ? maxPop+"%" : "—"}`);
       parts.push(`Snow risk: ${snowish ? "yes" : "no"}`);
-      parts.push(`Sky cover avg: ${avgSky!=null ? avgSky.toFixed(0)+"%" : "—"}`);
 
       el.textContent = parts.join(" | ");
       return;
@@ -1042,7 +1056,7 @@ async function updateNWSForecast(selectedISO){
     });
 
     if(!matches.length){
-      el.textContent = "—";
+      el.textContent = "No NWS forecast for this date yet.";
       return;
     }
 
@@ -1077,7 +1091,7 @@ async function updateNWSForecast(selectedISO){
 
     el.textContent = parts.join(" | ");
   } catch(e){
-    if(seq === NWS_SEQ) el.textContent = "—";
+    if(seq === NWS_SEQ) el.textContent = "Forecast unavailable right now (weather.gov didn't respond). Try again in a minute.";
   }
 }
 

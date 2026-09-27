@@ -69,7 +69,7 @@ Example parameters used:
 ---
 
 ### 2) Local conditions and coastal water temp
-**Castle Island `8444069` (NOAA PORTS, CO-OPS)**, 1.8 km from L Street: latest `air_temperature` (`units=english`, °F) and `wind` (`units=metric`, m/s, shown in mph with direction and gusts).
+**Castle Island `8444069` (NOAA PORTS, CO-OPS)**, 1.8 km from L Street: latest `air_temperature` (`units=english`, °F) and `wind` (`units=metric`, m/s, shown in mph with direction and gusts). When it is 50°F or colder with wind over 3 mph, the line adds **feels like** (NWS wind chill from the measured air temperature and wind); the NWS forecast line does the same from forecast values.
 
 **Gallops Island tide gauge `SLL-2699` (Stone Living Lab, via NERACOOS ERDDAP):** `water_temperature` (°F). The sensor went in August 2026 but has not reported water temperature yet, so this line only appears once there is a reading from the last 24 hours.
 
