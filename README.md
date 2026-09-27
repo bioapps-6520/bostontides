@@ -5,8 +5,9 @@ A lightweight, mobile-friendly tide + conditions viewer for Boston.
 - Pick a date (Boston local time)
 - View the **full-day tide curve** (NOAA predictions)
 - Drag/scrub on the plot to read tide height at any time
-- See the **moon**: a strip above the sun strip showing when the moon is up, with moonrise/moonset times and phase emoji, and a Moon line with phase, % lit, rise/set and a spring/neap tide hint (spring tides around new and full moon, neap around the quarters). Calculated in the page (main lunar terms; within about 3 minutes of USNO)
-- See **sunrise and sunset**: a day/night strip above the tide curve (night, twilight, daylight with 🌅/🌇 times), faint shading of dark hours on the curve, and a Sun line with sunrise, sunset, daylight length and first/last light. Calculated in the page for Boston (standard solar formulas; within 1–2 minutes of the US Naval Observatory), no extra data source
+- See an **Earth, sun and moon** cartoon at the bottom for the time selected on the tide curve: a view over the North Pole (not to scale) with the sun on the left, the Earth turned so Boston is where it really is at that hour (facing the sun at solar noon), the moon at its real angle from the sun (sunlit side toward the sun), and the tidal bulge lined up with Boston's predicted tide (Boston sits in the bulge at high tide, 90° from it at low tide). A dashed line points at the moon to show that Boston's high tide lags the moon
+- See the **moon**: a band above the sun band showing when the moon is up (colors only), and a Moon line with phase, % lit, rise/set and a spring/neap tide hint (spring tides around new and full moon, neap around the quarters). Calculated in the page (main lunar terms; within about 3 minutes of USNO)
+- See **sunrise and sunset**: a day/night band above the tide curve (night, twilight, daylight; colors only, with a key under the curve), faint shading of dark hours on the curve, and a Sun line with sunrise, sunset, daylight length and first/last light. Calculated in the page for Boston (standard solar formulas; within 1–2 minutes of the US Naval Observatory), no extra data source
 - See an **hourly table** from 05:00 to 22:00 with:
   - time
   - **% of day max high** (relative to the highest high tide event that day)
