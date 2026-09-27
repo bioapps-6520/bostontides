@@ -1293,7 +1293,7 @@ const MONTH = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov"
 
 let CAL = null;   // { byKey: Map("YYYY-MM-DD HH" -> ft), hilo: [...], days: [iso...], minFt, maxFt }
 let CAL_DAYS_SHOWN = 14;   // 2 weeks by default; the toggle switches to 5 weeks
-let CAL_COLOR_MODE = "ft";   // "ft" = tide height, "pct" = % of that day's max high
+let CAL_COLOR_MODE = "pct";  // default: % of that day's max high; "ft" = tide height
 
 function isoOf(d){ return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`; }
 function addDays(d, n){ const x = new Date(d); x.setDate(x.getDate() + n); return x; }
