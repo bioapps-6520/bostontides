@@ -172,12 +172,18 @@
       #sensorTable .narrowType { display:inline; }
     }
     #satTable td.num { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-    #satTable td:first-child { white-space:nowrap; }
+    #satTable td:first-child, #satSitesTable td:first-child { white-space:nowrap; }
+    #satSitesTable td.num { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    #satSitesTable td .muted { color: var(--muted); font-size:12px; font-family: system-ui, sans-serif; }
+    #satSitesTable tr.measured td { background:#fafafa; }
     #satTable .narrowOnly { display:none; }
     @media (max-width: 600px){
       #satTable { min-width:0; }
       #satTable th, #satTable td { padding:8px 6px; font-size:13px; }
-      #satTable .wideOnly { display:none; }
+      #satTable .wideOnly, #satTable .wideOnlyCol, #satSitesTable .wideOnly { display:none; }
+      #satSitesTable { min-width:0; }
+      #satSitesTable th, #satSitesTable td { padding:8px 6px; font-size:13px; }
+      #satSitesTable td:first-child { white-space:normal; }
       #satTable .narrowOnly { display:inline; }
     }
     #sundayTable td.num { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
@@ -423,18 +429,35 @@
   <!-- (the in-water sensors card follows it, at the very bottom) -->
   <div class="card" id="satSection" hidden>
     <div class="secTitle">Satellite water temp at L Street</div>
-    <div class="small">Daily satellite estimates for the water just off L Street, next to the offshore buoy's daily average. Estimates are 1–2 days old and less reliable right at the shore. In winter the buoy often reads about 5°F warmer than the beach.</div>
+    <div class="small">Daily satellite estimates (1–2 days old, less reliable right at the shore). The satellite is also read at buoy 44013, where the buoy measures the real water, to show how far off the satellite runs. In winter the buoy often reads about 5°F warmer than the beach.</div>
     <div class="small" id="satStatus" style="margin-top:6px;"></div>
-    <div style="height:10px;"></div>
+
+    <div style="font-weight:650; font-size:14px; margin:12px 0 6px;">Latest by location</div>
+    <div class="tableWrap">
+      <table id="satSitesTable">
+        <thead>
+          <tr>
+            <th>Location</th>
+            <th>NOAA blended<span class="wideOnly"> (~5 km)</span></th>
+            <th>NASA MUR<span class="wideOnly"> (~1 km)</span></th>
+          </tr>
+        </thead>
+        <tbody id="satSitesBody"></tbody>
+      </table>
+    </div>
+    <div class="small" id="satError" style="margin-top:8px;"></div>
+
+    <div style="font-weight:650; font-size:14px; margin:14px 0 6px;">Last 14 days</div>
     <div class="tableWrap">
       <table id="satTable">
         <thead>
           <tr>
             <th>Date</th>
-            <th>NOAA blended<span class="wideOnly"> (~5 km)</span></th>
-            <th>NASA MUR<span class="wideOnly"> (~1 km)</span></th>
-            <th>Buoy<span class="wideOnly"> 44013 (daily avg)</span></th>
-            <th><span class="wideOnly">Blended − buoy</span><span class="narrowOnly">Diff</span></th>
+            <th>L St<span class="wideOnly"> NOAA blended</span></th>
+            <th class="wideOnlyCol">L St NASA MUR</th>
+            <th>Sat. at buoy<span class="wideOnly"> (blended)</span></th>
+            <th>Buoy<span class="wideOnly"> 44013 measured (daily avg)</span></th>
+            <th><span class="wideOnly">L St − buoy</span><span class="narrowOnly">Diff</span></th>
           </tr>
         </thead>
         <tbody id="satBody"></tbody>
@@ -1034,12 +1057,12 @@ async function renderSatelliteHistory(){
     const dateTd = document.createElement("td");
     dateTd.textContent = `${WEEKDAY[d.getDay()]} ${d.getDate()} ${MONTH[d.getMonth()]}`;
     tr.appendChild(dateTd);
-    for(const c of [h.blended, h.mur, h.buoy]){
+    [[h.blended, ""], [h.mur, "wideOnlyCol"], [h.blended_buoy44013, ""], [h.buoy, ""]].forEach(([c, extra]) => {
       const td = document.createElement("td");
-      td.className = "num";
+      td.className = "num" + (extra ? " " + extra : "");
       fillTemp(td, c);
       tr.appendChild(td);
-    }
+    });
     const diffTd = document.createElement("td");
     diffTd.className = "num";
     diffTd.textContent = diffF == null ? "—"
@@ -1051,6 +1074,72 @@ async function renderSatelliteHistory(){
     document.getElementById("satStatus").textContent =
       `Updated ${fmtLocal(new Date(j.updated))} by the daily satellite job.`;
   }
+
+  // ---- Latest by location (satellite at each spot, plus the buoy's measurement)
+  const sitesBody = document.getElementById("satSitesBody");
+  sitesBody.textContent = "";
+  const sites = j.sites || [];
+  const lst = sites.find(x => x.key === "lst");
+  const samePixel = (a, b) => a && b && a.lat === b.lat && a.lon === b.lon;
+  const dayTag = (p) => {
+    const d = new Date(p.time);
+    return `${WEEKDAY[d.getUTCDay()]} ${d.getUTCDate()} ${MONTH[d.getUTCMonth()]}`;
+  };
+  const addRow = (label, cells, cls) => {
+    const tr = document.createElement("tr");
+    if(cls) tr.className = cls;
+    const th = document.createElement("td");
+    th.textContent = label;
+    tr.appendChild(th);
+    for(const [c, note] of cells){
+      const td = document.createElement("td");
+      td.className = "num";
+      fillTemp(td, c);
+      if(note){
+        const n = document.createElement("div");
+        n.className = "muted";
+        n.textContent = note;
+        td.appendChild(n);
+      }
+      tr.appendChild(td);
+    }
+    sitesBody.appendChild(tr);
+  };
+  for(const site of sites){
+    const cells = ["blended", "mur"].map(k => {
+      const p = site[k];
+      if(!p) return [null, ""];
+      const note = (site.key !== "lst" && samePixel(p, lst?.[k])) ? "same pixel as L St" : dayTag(p);
+      return [p.tempC, note];
+    });
+    addRow(site.name, cells);
+  }
+  // The buoy's own (in-water) reading for the same day as the satellite at the buoy
+  const buoySite = sites.find(x => x.key === "buoy44013");
+  const buoyDay = buoySite?.blended?.time?.slice(0, 10);
+  const buoyRow = hist.find(x => x.date === buoyDay && x.buoy != null) || hist.find(x => x.buoy != null);
+  if(buoyRow){
+    const [Y, M, D] = buoyRow.date.split("-").map(Number);
+    const d = new Date(Date.UTC(Y, M-1, D));
+    addRow("Buoy 44013 measured (in the water)",
+           [[buoyRow.buoy, `daily avg ${WEEKDAY[d.getUTCDay()]} ${d.getUTCDate()} ${MONTH[d.getUTCMonth()]}`], [null, ""]],
+           "measured");
+  }
+
+  // ---- Satellite error at the buoy, averaged over the history
+  const avgErrF = (k) => {
+    const pairs = hist.filter(x => x[k] != null && x.buoy != null);
+    if(!pairs.length) return null;
+    return { f: pairs.reduce((a, x) => a + (x[k] - x.buoy), 0) / pairs.length * 9/5, n: pairs.length };
+  };
+  const eB = avgErrF("blended_buoy44013"), eM = avgErrF("mur_buoy44013");
+  const describe = (name, e) => e == null ? null :
+    `${name} ${Math.abs(e.f) < 0.05 ? "matches it" : `reads ${Math.abs(e.f).toFixed(1)}°F ${e.f > 0 ? "warmer" : "colder"}`}` +
+    ` (avg of ${e.n} days)`;
+  const parts = [describe("NOAA blended", eB), describe("NASA MUR", eM)].filter(Boolean);
+  document.getElementById("satError").textContent = parts.length
+    ? `Satellite vs buoy 44013 at the same spot: ${parts.join("; ")}.`
+    : "";
 }
 
 /* ---------------- SHORE THERMOMETER LOG (Google Form → published CSV) ---------------- */
