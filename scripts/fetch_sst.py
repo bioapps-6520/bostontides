@@ -22,8 +22,20 @@ from datetime import datetime, timezone
 HISTORY_DAYS = 14
 BUOY_URL = "https://data.neracoos.org/erddap/tabledap/NDBC_44013.json"
 
-# Points in Dorchester Bay / off Pleasure Bay, closest to L Street first.
-POINTS = [(42.33, -71.02), (42.325, -71.025), (42.32, -70.99), (42.34, -71.00)]
+# Satellite "sites": water points tried closest-first (shore pixels are often
+# blank). "lst" is the main one used by the page's Conditions line.
+SITES = [
+    {"key": "lst", "name": "L Street / Pleasure Bay",
+     "points": [(42.33, -71.02), (42.325, -71.025), (42.32, -70.99), (42.34, -71.00)]},
+    {"key": "dorchester", "name": "Dorchester Bay (Tenean / Malibu)",
+     "points": [(42.31, -71.03), (42.30, -71.02)]},
+    {"key": "quincy", "name": "Quincy Bay (Wollaston)",
+     "points": [(42.28, -71.00), (42.285, -70.99), (42.29, -70.98)]},
+    # Same spot as buoy 44013: satellite minus buoy = the satellite's error there.
+    {"key": "buoy44013", "name": "At buoy 44013 (offshore)",
+     "points": [(42.346, -70.651)]},
+]
+POINTS = SITES[0]["points"]   # kept for readability of older notes
 
 SOURCES = [
     {"key": "blended", "name": "NOAA blended SST (~5 km)",
@@ -75,36 +87,51 @@ def fetch_buoy_daily_means(days):
             by_day[row[cols.index("time")][:10]].append(v)
     return {d: round(sum(v) / len(v), 2) for d, v in by_day.items()}
 
+def first_valid(src, points):
+    for lat, lon in points:
+        try:
+            p = fetch_point(src, lat, lon)
+        except Exception as e:
+            print(f"{src['key']} {lat},{lon}: {e}", file=sys.stderr)
+            continue
+        if p:
+            return p
+    return None
+
 def main():
     out = {"updated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-           "note": "Satellite estimate near L Street Beach; 1-2 days old, less reliable right at the shore.",
-           "sources": []}
-    for src in SOURCES:
-        for lat, lon in POINTS:
-            try:
-                p = fetch_point(src, lat, lon)
-            except Exception as e:
-                print(f"{src['key']} {lat},{lon}: {e}", file=sys.stderr)
-                continue
-            if p:
+           "note": "Satellite estimates near L Street Beach and nearby; 1-2 days old, less reliable right at the shore.",
+           "sources": [], "sites": []}
+
+    # Latest reading per site and source
+    for site in SITES:
+        entry = {"key": site["key"], "name": site["name"]}
+        for src in SOURCES:
+            p = first_valid(src, site["points"])
+            entry[src["key"]] = p
+            print(f"{site['key']} {src['key']}: {p}")
+            if p and site["key"] == "lst":
+                # "sources" = L Street, kept for the page's Conditions line
                 out["sources"].append({"key": src["key"], "name": src["name"], **p})
-                print(f"{src['key']}: {p}")
-                break
-        else:
-            print(f"{src['key']}: no valid pixel", file=sys.stderr)
+        out["sites"].append(entry)
     if not out["sources"]:
         print("No satellite data; leaving data/sst.json unchanged.", file=sys.stderr)
         return 1
 
-    # Daily history at each source's chosen pixel, plus the buoy's daily mean.
+    # Daily history per site/source at the chosen pixel. L Street uses the plain
+    # keys "blended"/"mur"; other sites use "<source>_<site>", e.g. "blended_buoy44013".
     history = defaultdict(dict)
-    for s in out["sources"]:
-        src = next(x for x in SOURCES if x["key"] == s["key"])
-        try:
-            for r in fetch_series(src, s["lat"], s["lon"], f"last-{HISTORY_DAYS - 1}:1:last"):
-                history[r["time"][:10]][s["key"]] = r["tempC"]
-        except Exception as e:
-            print(f"{s['key']} history: {e}", file=sys.stderr)
+    for site in out["sites"]:
+        for src in SOURCES:
+            p = site.get(src["key"])
+            if not p:
+                continue
+            key = src["key"] if site["key"] == "lst" else f"{src['key']}_{site['key']}"
+            try:
+                for r in fetch_series(src, p["lat"], p["lon"], f"last-{HISTORY_DAYS - 1}:1:last"):
+                    history[r["time"][:10]][key] = r["tempC"]
+            except Exception as e:
+                print(f"{key} history: {e}", file=sys.stderr)
     try:
         buoy = fetch_buoy_daily_means(HISTORY_DAYS)
         for d in list(history):
