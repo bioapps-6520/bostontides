@@ -285,7 +285,7 @@
     <div class="row" style="justify-content: space-between; align-items: center;">
       <div>
         <div class="secTitle">Tide calendar</div>
-        <div class="small">Hourly tide, 05:00 → 22:00. Darker = higher water. Tap a day to load it in the plot above.</div>
+        <div class="small">Hourly tide, 05:00 → 22:00. Darker = higher water. Tap an hour to show it on the plot above (tap a day name for 10:00).</div>
       </div>
       <div class="row" style="gap:8px;">
         <div class="seg" role="group" aria-label="Color by">
@@ -1350,6 +1350,10 @@ function updateSelectedLine(dt, vFt){
     `${fmtHM(dt)}  Tide ${vFt.toFixed(2)} ft (${vM.toFixed(2)} m)  •  ${pctTxt}`;
 }
 
+// Hour where the plot's dotted line/marker starts: 10:00 (Sunday meet) unless
+// the reader tapped a specific hour in the tide calendar.
+let PLOT_CURSOR_HOUR = 10;
+
 function renderPlot(){
   const plotDiv = document.getElementById("plot");
 
@@ -1359,7 +1363,7 @@ function renderPlot(){
   const yMax = Math.max(...ys);
 
   const cursor = new Date(CURVE[0].t);
-  cursor.setHours(10,0,0,0);
+  cursor.setHours(PLOT_CURSOR_HOUR,0,0,0);
   const cursorY = tideAtTimeFt(cursor);
 
   Plotly.newPlot(plotDiv, [
@@ -1633,12 +1637,13 @@ function pinOnScreen(el, ms = 6000){
   raf = requestAnimationFrame(tick);
 }
 
-function openDay(dayDate, anchorEl){
+function openDay(dayDate, anchorEl, hour){
   const iso = isoOf(dayDate);
   const el = document.getElementById("date");
   el.value = iso;
   // No auto-scroll to the plot: keep the tapped item where it is on screen.
   pinOnScreen(anchorEl);
+  PLOT_CURSOR_HOUR = (hour == null) ? 10 : hour;   // tapped cell hour, else 10:00
   loadDate(iso);
 }
 
@@ -1728,7 +1733,8 @@ function renderCalendar(){
     const el = e.target.closest(".cell");
     if(!el) return;
     showTip(e);
-    openDay(cellInfo(el).day, el);
+    const info = cellInfo(el);
+    openDay(info.day, el, info.h);
   };
 
   // Legend
@@ -2251,7 +2257,7 @@ loadCoastalTemps().catch(() => {
 
 const dateEl = document.getElementById("date");
 dateEl.value = todayISO();
-dateEl.addEventListener("change", () => loadDate(dateEl.value));
+dateEl.addEventListener("change", () => { PLOT_CURSOR_HOUR = 10; loadDate(dateEl.value); });
 loadDate(dateEl.value);
 </script>
 
