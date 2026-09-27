@@ -185,6 +185,10 @@
     }
     .stripKey { margin-top:8px; line-height:1.9; }
     .stripKey .sw { display:inline-block; width:14px; height:10px; border-radius:2px; vertical-align:middle; margin:0 4px 0 8px; }
+    .orbitControls { display:flex; flex-wrap:wrap; gap:10px 14px; align-items:end; margin-top:10px; }
+    .orbitControls label { display:grid; gap:6px; font-size:13px; color: var(--muted); }
+    .orbitControls .orbitTime { flex:1; min-width:220px; }
+    .orbitControls input[type=range] { width:100%; padding:0; accent-color:#111; height:28px; }
     .orbitWrap { background:#0f1730; border-radius:12px; margin-top:10px; padding:6px; display:flex; justify-content:center; }
     #orbitSvg { width:100%; max-width:460px; height:auto; display:block; }
     #satTable td.num { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
@@ -556,7 +560,14 @@
   <!-- ================= Earth, sun and moon (cartoon) ================= -->
   <div class="card" id="orbitSection">
     <div class="secTitle">Earth, sun and moon</div>
-    <div class="small">For the time selected on the tide curve. Looking down on the North Pole, not to scale. The blue oval is the tidal bulge; when Boston sits in it, it's high tide.</div>
+    <div class="small">Pick a date and time here or on the tide curve (they stay in sync). Looking down on the North Pole, not to scale. The blue oval is the tidal bulge; when Boston sits in it, it's high tide.</div>
+    <div class="orbitControls">
+      <label>Date <input id="orbitDate" type="date" /></label>
+      <label class="orbitTime">Time <span id="orbitTimeLabel" class="mono">10:00</span>
+        <input id="orbitTime" type="range" min="0" max="1434" step="6" value="600" aria-label="Time of day" />
+      </label>
+      <button id="orbitNow" class="secondary" type="button">Now</button>
+    </div>
     <div class="orbitWrap"><svg id="orbitSvg" viewBox="0 0 360 300" role="img" aria-label="Diagram of the Earth, sun and moon with Boston's position and the tidal bulge"></svg></div>
     <div class="small" id="orbitText" style="margin-top:8px;"></div>
   </div>
@@ -1681,6 +1692,58 @@ function scheduleOrbit(dt){
   ORBIT_RAF = requestAnimationFrame(() => { ORBIT_RAF = 0; renderOrbit(ORBIT_PENDING); });
 }
 
+// Bottom date/time controls: drive the curve's cursor, and follow it
+let ORBIT_SYNCING = false;
+function syncOrbitControls(dt){
+  if(ORBIT_SYNCING || !dt) return;
+  const d = document.getElementById("orbitDate"), t = document.getElementById("orbitTime");
+  if(!d || !t) return;
+  d.value = isoOf(dt);
+  const mins = dt.getHours() * 60 + dt.getMinutes();
+  t.value = String(Math.round(mins / 6) * 6);
+  document.getElementById("orbitTimeLabel").textContent = fmtHM(dt);
+}
+function curveTimeFromSlider(){
+  const mins = Number(document.getElementById("orbitTime").value);
+  if(!CURVE.length) return null;
+  const dt = new Date(CURVE[0].t); dt.setHours(0, mins, 0, 0);
+  const maxT = CURVE[CURVE.length - 1].t;
+  return dt > maxT ? new Date(maxT) : dt;
+}
+let SLIDER_RAF = 0;
+function initOrbitControls(){
+  const d = document.getElementById("orbitDate"), t = document.getElementById("orbitTime");
+  t.addEventListener("input", () => {
+    document.getElementById("orbitTimeLabel").textContent =
+      `${pad2(Math.floor(t.value / 60))}:${pad2(t.value % 60)}`;
+    if(SLIDER_RAF) return;
+    SLIDER_RAF = requestAnimationFrame(() => {
+      SLIDER_RAF = 0;
+      const dt = curveTimeFromSlider();
+      if(!dt) return;
+      const vFt = tideAtTimeFt(dt);
+      PLOT_CURSOR_MIN = dt.getHours() * 60 + dt.getMinutes();
+      ORBIT_SYNCING = true;                 // don't echo back into the slider
+      moveCurveCursor(dt, vFt);
+      updateSelectedLine(dt, vFt);
+      ORBIT_SYNCING = false;
+    });
+  });
+  d.addEventListener("change", () => {
+    if(!d.value) return;
+    PLOT_CURSOR_MIN = Number(t.value);      // keep the chosen time of day
+    document.getElementById("date").value = d.value;
+    loadDate(d.value);
+  });
+  document.getElementById("orbitNow").addEventListener("click", () => {
+    const now = new Date();
+    PLOT_CURSOR_MIN = Math.floor((now.getHours() * 60 + now.getMinutes()) / 6) * 6;
+    const iso = isoOf(now);
+    document.getElementById("date").value = iso;
+    loadDate(iso);
+  });
+}
+
 function renderOrbit(dt){
   const svg = document.getElementById("orbitSvg");
   if(!svg || !dt) return;
@@ -1713,12 +1776,13 @@ function renderOrbit(dt){
   for(const [x, y] of stars) svgEl("circle", { cx:x, cy:y, r:1.1, fill:"#cfd6ff", opacity:0.7 }, svg);
 
   // Sun (left) with rays toward the Earth
-  svgEl("circle", { cx:22, cy:cy, r:30, fill:"#ffd54a" }, svg);
+  // Whole sun inside the frame (left edge at x=8)
+  svgEl("circle", { cx:36, cy:cy, r:28, fill:"#ffd54a" }, svg);
   for(let i = -2; i <= 2; i++){
-    svgEl("line", { x1:58, y1:cy + i*28, x2:cx - R - 40, y2:cy + i*28,
+    svgEl("line", { x1:70, y1:cy + i*28, x2:cx - R - 40, y2:cy + i*28,
                     stroke:"#ffe9a3", "stroke-width":1, "stroke-dasharray":"2 6", opacity:0.6 }, svg);
   }
-  svgEl("text", { x:22, y:cy + 48, "text-anchor":"middle", "font-size":11, fill:"#ffe9a3" }, svg).textContent = "Sun";
+  svgEl("text", { x:36, y:cy + 46, "text-anchor":"middle", "font-size":11, fill:"#ffe9a3" }, svg).textContent = "Sun";
 
   // Moon orbit
   svgEl("circle", { cx, cy, r:orbitR, fill:"none", stroke:"#56607e", "stroke-width":1, "stroke-dasharray":"3 5" }, svg);
@@ -1771,8 +1835,17 @@ function renderOrbit(dt){
     `. The dashed line points at the moon; Boston's high tide comes hours after the moon passes overhead, as the ocean takes time to respond.`;
 }
 
+// Move the dotted line + marker on the tide curve (no full redraw)
+function moveCurveCursor(dt, vFt){
+  const plotDiv = document.getElementById("plot");
+  if(!plotDiv?._fullLayout) return;
+  Plotly.relayout(plotDiv, { "shapes[0].x0": dt, "shapes[0].x1": dt });
+  Plotly.restyle(plotDiv, { x:[[dt]], y:[[vFt]] }, [1]);
+}
+
 function updateSelectedLine(dt, vFt){
   scheduleOrbit(dt);
+  syncOrbitControls(dt);
   const vM = ftToM(vFt);
   let pctTxt = "—";
   if(DAY_MAX_HIGH_FT && DAY_MAX_HIGH_FT > 0){
@@ -1975,7 +2048,7 @@ function updateSunLine(t){
 
 // Hour where the plot's dotted line/marker starts: 10:00 (Sunday meet) unless
 // the reader tapped a specific hour in the tide calendar.
-let PLOT_CURSOR_HOUR = 10;
+let PLOT_CURSOR_MIN = 10 * 60;   // minutes after midnight
 
 function renderPlot(){
   const plotDiv = document.getElementById("plot");
@@ -1986,7 +2059,7 @@ function renderPlot(){
   const yMax = Math.max(...ys);
 
   const cursor = new Date(CURVE[0].t);
-  cursor.setHours(PLOT_CURSOR_HOUR,0,0,0);
+  cursor.setHours(0, PLOT_CURSOR_MIN, 0, 0);
   const cursorY = tideAtTimeFt(cursor);
 
   const dayStart = new Date(CURVE[0].t); dayStart.setHours(0, 0, 0, 0);
@@ -2067,8 +2140,7 @@ function installScrub(){
     const vFt = tideAtTimeFt(clamped);
     const vM = ftToM(vFt);
 
-    Plotly.relayout(plotDiv, { "shapes[0].x0": clamped, "shapes[0].x1": clamped });
-    Plotly.restyle(plotDiv, { x:[[clamped]], y:[[vFt]] }, [1]);
+    moveCurveCursor(clamped, vFt);
 
     let pctTxt = "—";
     let maxTxt = "Day max high: —";
@@ -2277,7 +2349,7 @@ function openDay(dayDate, anchorEl, hour){
   el.value = iso;
   // No auto-scroll to the plot: keep the tapped item where it is on screen.
   pinOnScreen(anchorEl);
-  PLOT_CURSOR_HOUR = (hour == null) ? 10 : hour;   // tapped cell hour, else 10:00
+  PLOT_CURSOR_MIN = ((hour == null) ? 10 : hour) * 60;   // tapped cell hour, else 10:00
   loadDate(iso);
 }
 
@@ -2867,6 +2939,17 @@ async function loadDate(isoDate){
 }
 
 installScrub();
+initOrbitControls();
+
+// The curve's scrub tooltip is position:fixed and stays up on touch screens:
+// hide it on a tap elsewhere, a finger scroll outside the curve, or the wheel.
+(() => {
+  const hide = () => { document.getElementById("hoverBox").style.display = "none"; };
+  document.addEventListener("pointerdown", (e) => { if(!e.target.closest("#overlay")) hide(); });
+  window.addEventListener("touchmove", (e) => { if(!e.target.closest?.("#overlay")) hide(); }, { passive:true });
+  window.addEventListener("wheel", hide, { passive:true });
+  document.getElementById("orbitTime").addEventListener("input", hide);
+})();
 
 // Tide calendar + Sundays: independent of the selected date; load once.
 loadCalendar();
@@ -2894,7 +2977,7 @@ loadCoastalTemps().catch(() => {
 
 const dateEl = document.getElementById("date");
 dateEl.value = todayISO();
-dateEl.addEventListener("change", () => { PLOT_CURSOR_HOUR = 10; loadDate(dateEl.value); });
+dateEl.addEventListener("change", () => { PLOT_CURSOR_MIN = 10 * 60; loadDate(dateEl.value); });
 loadDate(dateEl.value);
 </script>
 
