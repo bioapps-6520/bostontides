@@ -1209,7 +1209,7 @@ const WEEKDAY = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 const MONTH = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
 let CAL = null;   // { byKey: Map("YYYY-MM-DD HH" -> ft), hilo: [...], days: [iso...], minFt, maxFt }
-let CAL_DAYS_SHOWN = (window.innerWidth < 600) ? 14 : 35;
+let CAL_DAYS_SHOWN = 14;   // 2 weeks by default; the toggle switches to 5 weeks
 let CAL_COLOR_MODE = "ft";   // "ft" = tide height, "pct" = % of that day's max high
 
 function isoOf(d){ return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`; }
