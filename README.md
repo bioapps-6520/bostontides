@@ -5,6 +5,7 @@ A lightweight, mobile-friendly tide + conditions viewer for Boston.
 - Pick a date (Boston local time)
 - View the **full-day tide curve** (NOAA predictions)
 - Drag/scrub on the plot to read tide height at any time
+- See **sunrise and sunset**: a day/night strip above the tide curve (night, twilight, daylight with 🌅/🌇 times), faint shading of dark hours on the curve, and a Sun line with sunrise, sunset, daylight length and first/last light. Calculated in the page for Boston (standard solar formulas; within 1–2 minutes of the US Naval Observatory), no extra data source
 - See an **hourly table** from 05:00 to 22:00 with:
   - time
   - **% of day max high** (relative to the highest high tide event that day)

@@ -289,6 +289,10 @@
     </div>
     <div class="kv">
       <div class="line">
+        <span class="k">Sun:</span>
+        <span class="pill" id="sunLine">—</span>
+      </div>
+      <div class="line">
         <span class="k">Tide events:</span>
         <span class="pill" id="tideEventsLine">—</span>
       </div>
@@ -1644,6 +1648,87 @@ function updateSelectedLine(dt, vFt){
     `${fmtHM(dt)}  Tide ${vFt.toFixed(2)} ft (${vM.toFixed(2)} m)  •  ${pctTxt}`;
 }
 
+// Sun position (standard low-precision solar formulas, ~1 min accuracy)
+const SUN_RAD = Math.PI / 180, SUN_DAY_MS = 86400000, SUN_J1970 = 2440588, SUN_J2000 = 2451545;
+function sunTimes(date, lat, lon){
+  const toJulian = (d) => d.valueOf() / SUN_DAY_MS - 0.5 + SUN_J1970;
+  const fromJulian = (j) => new Date((j + 0.5 - SUN_J1970) * SUN_DAY_MS);
+  const e = SUN_RAD * 23.4397, J0 = 0.0009;
+  const lw = SUN_RAD * -lon, phi = SUN_RAD * lat;
+  const d = toJulian(date) - SUN_J2000;
+  const n = Math.round(d - J0 - lw / (2 * Math.PI));
+  const ds = J0 + lw / (2 * Math.PI) + n;
+  const M = SUN_RAD * (357.5291 + 0.98560028 * ds);
+  const C = SUN_RAD * (1.9148 * Math.sin(M) + 0.02 * Math.sin(2 * M) + 0.0003 * Math.sin(3 * M));
+  const L = M + C + SUN_RAD * 102.9372 + Math.PI;
+  const dec = Math.asin(Math.sin(e) * Math.sin(L));
+  const transit = (a) => SUN_J2000 + a + 0.0053 * Math.sin(M) - 0.0069 * Math.sin(2 * L);
+  const Jnoon = transit(ds);
+  const at = (h) => {                       // h = sun altitude in degrees
+    const cosW = (Math.sin(h * SUN_RAD) - Math.sin(phi) * Math.sin(dec)) / (Math.cos(phi) * Math.cos(dec));
+    if(cosW < -1 || cosW > 1) return [null, null];   // polar day/night
+    const w = Math.acos(cosW);
+    const Jset = transit(J0 + (w + lw) / (2 * Math.PI) + n);
+    return [fromJulian(Jnoon - (Jset - Jnoon)), fromJulian(Jset)];
+  };
+  const [sunrise, sunset] = at(-0.833);
+  const [dawn, dusk] = at(-6);              // civil twilight
+  return { dawn, sunrise, noon: fromJulian(Jnoon), sunset, dusk };
+}
+
+// Day/night strip drawn above the tide curve, plus faint night shading on it.
+const SUN_COLORS = { night:"#24324f", twilight:"#f2b880", day:"#ffe8a3" };
+function dayNightDecor(dayStart, dayEnd){
+  const noon = new Date(dayStart); noon.setHours(12, 0, 0, 0);
+  const t = sunTimes(noon, NWS_LAT, NWS_LON);
+  const clamp = (d) => new Date(Math.min(dayEnd, Math.max(dayStart, d)));
+  // Segments across the day: night | twilight | day | twilight | night
+  const segs = [];
+  if(t.sunrise && t.sunset){
+    const dawn = t.dawn || t.sunrise, dusk = t.dusk || t.sunset;
+    segs.push(["night", dayStart, dawn], ["twilight", dawn, t.sunrise], ["day", t.sunrise, t.sunset],
+              ["twilight", t.sunset, dusk], ["night", dusk, dayEnd]);
+  }
+  const shapes = [], annotations = [];
+  for(const [kind, a, b] of segs){
+    const x0 = clamp(a), x1 = clamp(b);
+    if(x1 <= x0) continue;
+    // strip above the plot
+    shapes.push({ type:"rect", xref:"x", yref:"paper", x0, x1, y0:1.02, y1:1.13,
+                  fillcolor: SUN_COLORS[kind], line:{ width:0 }, layer:"above" });
+    // faint shading of dark hours on the curve itself
+    if(kind !== "day"){
+      shapes.push({ type:"rect", xref:"x", yref:"paper", x0, x1, y0:0, y1:1,
+                    fillcolor: kind === "night" ? "rgba(36,50,79,0.08)" : "rgba(242,184,128,0.14)",
+                    line:{ width:0 }, layer:"below" });
+    }
+  }
+  const label = (x, text, anchor) => annotations.push({
+    x, y:1.075, xref:"x", yref:"paper", text, showarrow:false, xanchor:anchor,
+    font:{ size:11, color:"#111" }, bgcolor:"rgba(255,255,255,0.92)", borderpad:2
+  });
+  if(t.sunrise) label(t.sunrise, `🌅 ${fmtHM(t.sunrise)}`, "center");
+  if(t.sunset)  label(t.sunset,  `🌇 ${fmtHM(t.sunset)}`, "center");
+  // moon at the middle of each night segment (cartoon touch, only if there is room)
+  for(const [kind, a, b] of segs){
+    if(kind !== "night") continue;
+    const x0 = clamp(a), x1 = clamp(b);
+    if(x1 - x0 < 3*3600000) continue;
+    annotations.push({ x: new Date((x0.getTime() + x1.getTime())/2), y:1.075, xref:"x", yref:"paper",
+                       text:"🌙", showarrow:false, font:{ size:11 } });
+  }
+  return { shapes, annotations, times: t };
+}
+
+function updateSunLine(t){
+  const el = document.getElementById("sunLine");
+  if(!t?.sunrise || !t?.sunset){ el.textContent = "—"; return; }
+  const mins = Math.round((t.sunset - t.sunrise) / 60000);
+  el.textContent = `🌅 Sunrise ${fmtHM(t.sunrise)} • 🌇 Sunset ${fmtHM(t.sunset)} • ` +
+    `daylight ${Math.floor(mins/60)}h ${pad2(mins % 60)}m` +
+    (t.dawn && t.dusk ? ` (first light ${fmtHM(t.dawn)}, last light ${fmtHM(t.dusk)})` : "");
+}
+
 // Hour where the plot's dotted line/marker starts: 10:00 (Sunday meet) unless
 // the reader tapped a specific hour in the tide calendar.
 let PLOT_CURSOR_HOUR = 10;
@@ -1660,12 +1745,18 @@ function renderPlot(){
   cursor.setHours(PLOT_CURSOR_HOUR,0,0,0);
   const cursorY = tideAtTimeFt(cursor);
 
+  const dayStart = new Date(CURVE[0].t); dayStart.setHours(0, 0, 0, 0);
+  const dayEnd = new Date(dayStart); dayEnd.setDate(dayEnd.getDate() + 1);
+  const sun = dayNightDecor(dayStart, dayEnd);
+  updateSunLine(sun.times);
+
   Plotly.newPlot(plotDiv, [
     { x: xs, y: ys, mode:"lines", name:"Tide" },
     { x: [cursor], y: [cursorY], mode:"markers", name:"Selected", marker:{size:11} }
   ], {
-    margin: { l: 60, r: 20, t: 10, b: 60 },
-    xaxis: { title: "Local time (Boston)", type:"date", fixedrange:true, tickformat:"%H:%M" },
+    margin: { l: 60, r: 20, t: 40, b: 60 },
+    xaxis: { title: "Local time (Boston)", type:"date", fixedrange:true, tickformat:"%H:%M",
+             range: [dayStart, dayEnd] },
     yaxis: { title: "Height (ft)", fixedrange:true },
     showlegend: false,
     hovermode: false,
@@ -1676,7 +1767,8 @@ function renderPlot(){
       y0: yMin, y1: yMax,
       xref:"x", yref:"y",
       line:{ width:2, dash:"dot", color:"#000" }
-    }]
+    }, ...sun.shapes],            // shapes[0] must stay the cursor line (scrub updates it)
+    annotations: sun.annotations
   }, {
     responsive:true,
     displayModeBar:false,
@@ -1715,9 +1807,11 @@ function installScrub(){
     if(!CURVE.length || !plotDiv._fullLayout) return;
 
     const rect = overlay.getBoundingClientRect();
-    const xpx = clientX - rect.left;
-
     const xaxis = plotDiv._fullLayout.xaxis;
+    // p2d() expects pixels from the start of the x axis, not from the plot's
+    // left edge: subtract the left margin (xaxis._offset), otherwise the time
+    // read out lands right of the finger (hours off on a phone).
+    const xpx = clientX - rect.left - xaxis._offset;
     const xDate = new Date(xaxis.p2d(xpx));
 
     const minT = CURVE[0].t;
