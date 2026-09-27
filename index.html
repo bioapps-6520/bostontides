@@ -159,6 +159,15 @@
     }
     #thermoSection .btnLink { display:inline-block; padding:9px 14px; border-radius:10px; background:#111; color:#fff; text-decoration:none; font-size:14px; }
     #thermoTable td.num { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    #satTable td.num { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    #satTable td:first-child { white-space:nowrap; }
+    #satTable .narrowOnly { display:none; }
+    @media (max-width: 600px){
+      #satTable { min-width:0; }
+      #satTable th, #satTable td { padding:8px 6px; font-size:13px; }
+      #satTable .wideOnly { display:none; }
+      #satTable .narrowOnly { display:inline; }
+    }
     #sundayTable td.num { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
     #sundayTable tbody tr { cursor:pointer; }
     #sundayTable tbody tr:hover { background:#fafafa; }
@@ -395,6 +404,28 @@
       <div class="cardInner">
         <div id="coastalMap" aria-label="Coastal station map"></div>
       </div>
+    </div>
+  </div>
+
+  <!-- ================= Satellite water temp history ================= -->
+  <div class="card" id="satSection" hidden>
+    <div class="secTitle">Satellite water temp at L Street</div>
+    <div class="small">Daily satellite estimates for the water just off L Street, next to the offshore buoy's daily average. Estimates are 1–2 days old and less reliable right at the shore. In winter the buoy often reads about 5°F warmer than the beach.</div>
+    <div class="small" id="satStatus" style="margin-top:6px;"></div>
+    <div style="height:10px;"></div>
+    <div class="tableWrap">
+      <table id="satTable">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>NOAA blended<span class="wideOnly"> (~5 km)</span></th>
+            <th>NASA MUR<span class="wideOnly"> (~1 km)</span></th>
+            <th>Buoy<span class="wideOnly"> 44013 (daily avg)</span></th>
+            <th><span class="wideOnly">Blended − buoy</span><span class="narrowOnly">Diff</span></th>
+          </tr>
+        </thead>
+        <tbody id="satBody"></tbody>
+      </table>
     </div>
   </div>
 
@@ -649,10 +680,17 @@ async function fetchCastleIsland(){
 // Satellite water temp off L Street, written daily by a GitHub Action
 // (.github/workflows/satellite-sst.yml) into data/sst.json on this site.
 const SST_MAX_AGE_DAYS = 5;
+let SST_PROMISE = null;
+function loadSstFile(){
+  if(!SST_PROMISE){
+    SST_PROMISE = fetch("data/sst.json", { cache:"no-store" })
+      .then(r => r.ok ? r.json() : null).catch(() => null);
+  }
+  return SST_PROMISE;
+}
 async function fetchSatelliteSst(){
-  const r = await fetch("data/sst.json", { cache:"no-store" });
-  if(!r.ok) return null;
-  const j = await r.json();
+  const j = await loadSstFile();
+  if(!j) return null;
   const src = (j?.sources || []).find(x => x.key === "blended") || j?.sources?.[0];
   if(!src || src.tempC == null) return null;
   const t = new Date(src.time);
@@ -689,36 +727,36 @@ async function updateNDBCConditions(){
 
     // Harbor water (Gallops Island), only once the sensor reports
     const harborLines = (gallopsF != null)
-      ? [`Harbor water (Gallops Is.): ${gallopsF.toFixed(1)}°F (${fToC(gallopsF).toFixed(1)}°C)`]
+      ? [`Water, Gallops Island gauge: ${gallopsF.toFixed(1)}°F (${fToC(gallopsF).toFixed(1)}°C)`]
       : [];
 
     // Satellite estimate right off L Street (daily, 1-2 days old)
     if(sst){
       const d = sst.time;
-      harborLines.push(`Satellite at L St (est. ${WEEKDAY[d.getDay()]} ${d.getDate()} ${MONTH[d.getMonth()]}): ` +
+      harborLines.push(`Water, satellite at L St (est. ${WEEKDAY[d.getDay()]} ${d.getDate()} ${MONTH[d.getMonth()]}): ` +
         `${sst.tempF.toFixed(1)}°F (${fToC(sst.tempF).toFixed(1)}°C)`);
     }
 
     // Castle Island wind + air (closest to the beaches)
-    let castleLine = "Castle Island: —";
+    let castleLine = "Air & wind, Castle Island: —";
     if(castle){
       const parts = [];
-      if(castle.airF != null) parts.push(`air ${castle.airF.toFixed(1)}°F (${fToC(castle.airF).toFixed(1)}°C)`);
+      if(castle.airF != null) parts.push(`${castle.airF.toFixed(1)}°F (${fToC(castle.airF).toFixed(1)}°C)`);
       if(castle.windMph != null){
         let w = `wind ${castle.windMph.toFixed(0)} mph${castle.dir ? " " + castle.dir : ""}`;
         if(castle.gustMph != null) w += `, gusts ${castle.gustMph.toFixed(0)}`;
         parts.push(w);
       }
       if(castle.asOf) parts.push(`as of ${fmtHM(castle.asOf)}`);
-      castleLine = `Castle Island: ${parts.join(" • ")}`;
+      castleLine = `Air & wind, Castle Island: ${parts.join(" • ")}`;
     }
 
     // Coastal lines (one per CO-OPS station)
     const coastalLines = COASTAL_TEMP_STATIONS.map((st, i) => {
       const f = coastal[i]?.tempF;
       return (f != null)
-        ? `Coastal water (${st.name}): ${f.toFixed(1)}°F (${fToC(f).toFixed(1)}°C)`
-        : `Coastal water (${st.name}): —`;
+        ? `Water, ${st.name}: ${f.toFixed(1)}°F (${fToC(f).toFixed(1)}°C)`
+        : `Water, ${st.name}: —`;
     });
 
     // Buoy line (secondary)
@@ -762,13 +800,58 @@ async function updateNDBCConditions(){
     // One line per source in the same pill:
     // Shore thermometer (club members' own reading) goes first when recent
     const shoreLines = shore
-      ? [`Shore thermometer (${shore.beach ? shore.beach + ", " : ""}${fmtReadingWhen(shore.t)}): ` +
+      ? [`Water, shore thermometer (${shore.beach ? shore.beach + ", " : ""}${fmtReadingWhen(shore.t)}): ` +
          `${shore.f.toFixed(1)}°F (${fToC(shore.f).toFixed(1)}°C)`]
       : [];
 
-    el.textContent = [...shoreLines, castleLine, ...harborLines, ...coastalLines, buoyLine].join("\n");
+    // Water lines first (closest to the beach first), then air & wind, then the buoy
+    el.textContent = [...shoreLines, ...harborLines, ...coastalLines, castleLine, buoyLine].join("\n");
   } catch(e){
     el.textContent = "—";
+  }
+}
+
+/* ---------------- SATELLITE HISTORY TABLE ---------------- */
+async function renderSatelliteHistory(){
+  const j = await loadSstFile();
+  const hist = j?.history || [];
+  if(!hist.length) return;
+  document.getElementById("satSection").hidden = false;
+  const body = document.getElementById("satBody");
+  body.textContent = "";
+  // °F always; °C only on wide screens (span hidden on phones)
+  const fillTemp = (td, c) => {
+    if(c == null){ td.textContent = "—"; return; }
+    td.textContent = `${cToF(c).toFixed(1)}°F`;
+    const sp = document.createElement("span");
+    sp.className = "wideOnly";
+    sp.textContent = ` (${Number(c).toFixed(1)}°C)`;
+    td.appendChild(sp);
+  };
+  for(const h of hist){
+    const [Y, M, D] = h.date.split("-").map(Number);
+    const d = new Date(Y, M-1, D);
+    const diffF = (h.blended != null && h.buoy != null) ? (h.blended - h.buoy) * 9/5 : null;
+    const tr = document.createElement("tr");
+    const dateTd = document.createElement("td");
+    dateTd.textContent = `${WEEKDAY[d.getDay()]} ${d.getDate()} ${MONTH[d.getMonth()]}`;
+    tr.appendChild(dateTd);
+    for(const c of [h.blended, h.mur, h.buoy]){
+      const td = document.createElement("td");
+      td.className = "num";
+      fillTemp(td, c);
+      tr.appendChild(td);
+    }
+    const diffTd = document.createElement("td");
+    diffTd.className = "num";
+    diffTd.textContent = diffF == null ? "—"
+      : (Math.abs(diffF) < 0.05 ? "0.0°F" : `${diffF > 0 ? "+" : "−"}${Math.abs(diffF).toFixed(1)}°F`);
+    tr.appendChild(diffTd);
+    body.appendChild(tr);
+  }
+  if(j.updated){
+    document.getElementById("satStatus").textContent =
+      `Updated ${fmtLocal(new Date(j.updated))} by the daily satellite job.`;
   }
 }
 
@@ -1885,6 +1968,9 @@ installScrub();
 
 // Tide calendar + Sundays: independent of the selected date; load once.
 loadCalendar();
+
+// Satellite history table at the bottom (hidden if data/sst.json has none)
+renderSatelliteHistory();
 
 // Shore thermometer log (hidden until THERMO_CSV_URL is set)
 renderThermoLog();
