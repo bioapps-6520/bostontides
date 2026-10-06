@@ -1,22 +1,22 @@
 {
-  "updated": "2026-10-04T15:49:34Z",
+  "updated": "2026-10-06T17:15:41Z",
   "note": "Satellite estimates near L Street Beach and nearby; 1-2 days old, less reliable right at the shore.",
   "sources": [
     {
       "key": "blended",
       "name": "NOAA blended SST (~5 km)",
-      "time": "2026-10-02T12:00:00Z",
+      "time": "2026-10-04T12:00:00Z",
       "lat": 42.325,
       "lon": -71.025,
-      "tempC": 16.57
+      "tempC": 15.99
     },
     {
       "key": "mur",
       "name": "NASA MUR SST (~1 km)",
-      "time": "2026-10-03T09:00:00Z",
+      "time": "2026-10-05T09:00:00Z",
       "lat": 42.33,
       "lon": -71.02,
-      "tempC": 16.53
+      "tempC": 16.15
     }
   ],
   "sites": [
@@ -24,98 +24,122 @@
       "key": "lst",
       "name": "L Street / Pleasure Bay",
       "blended": {
-        "time": "2026-10-02T12:00:00Z",
+        "time": "2026-10-04T12:00:00Z",
         "lat": 42.325,
         "lon": -71.025,
-        "tempC": 16.57
+        "tempC": 15.99
       },
       "mur": {
-        "time": "2026-10-03T09:00:00Z",
+        "time": "2026-10-05T09:00:00Z",
         "lat": 42.33,
         "lon": -71.02,
-        "tempC": 16.53
+        "tempC": 16.15
       }
     },
     {
       "key": "dorchester",
       "name": "Dorchester Bay (Tenean / Malibu)",
       "blended": {
-        "time": "2026-10-02T12:00:00Z",
+        "time": "2026-10-04T12:00:00Z",
         "lat": 42.325,
         "lon": -71.025,
-        "tempC": 16.57
+        "tempC": 15.99
       },
       "mur": {
-        "time": "2026-10-03T09:00:00Z",
+        "time": "2026-10-05T09:00:00Z",
         "lat": 42.31,
         "lon": -71.03,
-        "tempC": 16.61
+        "tempC": 16.25
       }
     },
     {
       "key": "quincy",
       "name": "Quincy Bay (Wollaston)",
       "blended": {
-        "time": "2026-10-02T12:00:00Z",
+        "time": "2026-10-04T12:00:00Z",
         "lat": 42.275,
         "lon": -70.975,
-        "tempC": 16.56
+        "tempC": 16.02
       },
       "mur": {
-        "time": "2026-10-03T09:00:00Z",
+        "time": "2026-10-05T09:00:00Z",
         "lat": 42.28,
         "lon": -71,
-        "tempC": 16.7
+        "tempC": 16.35
       }
     },
     {
       "key": "buoy44013",
       "name": "At buoy 44013 (offshore)",
       "blended": {
-        "time": "2026-10-02T12:00:00Z",
+        "time": "2026-10-04T12:00:00Z",
         "lat": 42.325,
         "lon": -70.675,
-        "tempC": 16.09
+        "tempC": 15.56
       },
       "mur": {
-        "time": "2026-10-03T09:00:00Z",
+        "time": "2026-10-05T09:00:00Z",
         "lat": 42.35,
         "lon": -70.65,
-        "tempC": 15.89
+        "tempC": 15.47
       }
     }
   ],
   "history": [
     {
+      "date": "2026-10-05",
+      "mur": 16.15,
+      "mur_dorchester": 16.25,
+      "mur_quincy": 16.35,
+      "mur_buoy44013": 15.47,
+      "buoy": 15.49
+    },
+    {
+      "date": "2026-10-04",
+      "blended": 15.99,
+      "mur": 16.24,
+      "blended_dorchester": 15.99,
+      "mur_dorchester": 16.34,
+      "blended_quincy": 16.02,
+      "mur_quincy": 16.49,
+      "blended_buoy44013": 15.56,
+      "mur_buoy44013": 15.62,
+      "buoy": 15.34
+    },
+    {
       "date": "2026-10-03",
-      "mur": 16.53,
-      "mur_dorchester": 16.61,
-      "mur_quincy": 16.7,
-      "mur_buoy44013": 15.89,
+      "blended": 15.9,
+      "mur": 16.49,
+      "blended_dorchester": 15.9,
+      "mur_dorchester": 16.58,
+      "blended_quincy": 15.94,
+      "mur_quincy": 16.71,
+      "blended_buoy44013": 15.61,
+      "mur_buoy44013": 15.83,
       "buoy": 15.7
     },
     {
       "date": "2026-10-02",
       "blended": 16.57,
-      "mur": 16.46,
+      "mur": 16.27,
       "blended_dorchester": 16.57,
-      "mur_dorchester": 16.55,
+      "mur_dorchester": 16.34,
       "blended_quincy": 16.56,
-      "mur_quincy": 16.62,
+      "mur_quincy": 16.42,
       "blended_buoy44013": 16.09,
-      "mur_buoy44013": 15.55,
+      "mur_buoy44013": 15.56,
       "buoy": 15.65
     },
     {
       "date": "2026-10-01",
       "blended": 15.27,
-      "mur": 16.4,
+      "mur": 16.25,
       "blended_dorchester": 15.27,
-      "mur_dorchester": 16.5,
+      "mur_dorchester": 16.32,
       "blended_quincy": 15.3,
-      "mur_quincy": 16.59,
+      "mur_quincy": 16.4,
       "blended_buoy44013": 15.01,
-      "mur_buoy44013": 15.63,
+      "mur_buoy44013": 15.56,
       "buoy": 15.31
     },
     {
@@ -225,30 +249,6 @@
       "blended_buoy44013": 16.69,
       "mur_buoy44013": 16.73,
       "buoy": 17.14
-    },
-    {
-      "date": "2026-09-21",
-      "blended": 17.18,
-      "mur": 17.41,
-      "blended_dorchester": 17.18,
-      "mur_dorchester": 17.45,
-      "blended_quincy": 17.23,
-      "mur_quincy": 17.5,
-      "blended_buoy44013": 17.46,
-      "mur_buoy44013": 17.36,
-      "buoy": 17.66
-    },
-    {
-      "date": "2026-09-20",
-      "blended": 17.52,
-      "mur": 17.4,
-      "blended_dorchester": 17.52,
-      "mur_dorchester": 17.48,
-      "blended_quincy": 17.59,
-      "mur_quincy": 17.6,
-      "blended_buoy44013": 17.97,
-      "mur_buoy44013": 18.78,
-      "buoy": 18.17
     }
   ]
 }
